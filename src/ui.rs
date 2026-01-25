@@ -309,145 +309,6 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
-    let area = centered_rect(70, 70, frame.area());
-    frame.render_widget(Clear, area);
-    let title = if app.edit_index.is_some() {
-        "Edit connection"
-    } else {
-        "New connection"
-    };
-    let block = Block::default()
-        .title(Line::from(Span::styled(
-            title,
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        )))
-        .borders(Borders::ALL);
-    frame.render_widget(block, area);
-
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 2,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(4),
-    };
-
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(2)].as_ref())
-        .split(inner);
-
-    let mut lines = Vec::new();
-    let name_row;
-    let user_row;
-    let host_row;
-    let auth_row;
-    let mut key_row = None;
-    let mut pass_row = None;
-    let mut row_idx = 0usize;
-
-    name_row = Some(row_idx);
-    lines.push(field_line(
-        "Name",
-        &app.new_connection.name,
-        app.new_connection.active_field == Field::Name,
-        false,
-        LABEL_WIDTH,
-    ));
-    row_idx += 1;
-
-    user_row = Some(row_idx);
-    lines.push(field_line(
-        "User",
-        &app.new_connection.user,
-        app.new_connection.active_field == Field::User,
-        false,
-        LABEL_WIDTH,
-    ));
-    row_idx += 1;
-
-    host_row = Some(row_idx);
-    lines.push(field_line(
-        "Host",
-        &app.new_connection.host,
-        app.new_connection.active_field == Field::Host,
-        false,
-        LABEL_WIDTH,
-    ));
-    row_idx += 1;
-
-    auth_row = Some(row_idx);
-    lines.push(field_line(
-        "Auth",
-        auth_kind_label(app.new_connection.auth_kind),
-        app.new_connection.active_field == Field::AuthType,
-        false,
-        LABEL_WIDTH,
-    ));
-    row_idx += 1;
-    if matches!(
-        app.new_connection.auth_kind,
-        AuthKind::PrivateKey | AuthKind::PrivateKeyWithPassword
-    ) {
-        key_row = Some(row_idx);
-        lines.push(field_line(
-            "Key path",
-            &app.new_connection.key_path,
-            app.new_connection.active_field == Field::KeyPath,
-            false,
-            LABEL_WIDTH,
-        ));
-        row_idx += 1;
-        row_idx += 1;
-    }
-    if matches!(
-        app.new_connection.auth_kind,
-        AuthKind::PasswordOnly | AuthKind::PrivateKeyWithPassword
-    ) {
-        pass_row = Some(row_idx);
-        lines.push(field_line(
-            "Password",
-            &app.new_connection.password,
-            app.new_connection.active_field == Field::Password,
-            true,
-            LABEL_WIDTH,
-        ));
-    }
-
-    lines.push(Line::from(""));
-    let actions = vec![
-        action_line(
-            "Test connection",
-            app.new_connection.active_field == Field::ActionTest,
-        ),
-        action_line(
-            "Save connection",
-            app.new_connection.active_field == Field::ActionSave,
-        ),
-    ];
-    lines.extend(actions);
-
-    if let Some(message) = &app.new_connection_feedback {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            message.as_str(),
-            Style::default().fg(Color::Red),
-        )));
-    }
-
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, layout[0]);
-    render_input_cursor(
-        frame,
-        app,
-        layout[0],
-        name_row,
-        user_row,
-        host_row,
-        auth_row,
-        key_row,
-        pass_row,
-    );
-
     let mut footer_lines = Vec::new();
     footer_lines.push(Line::from(vec![
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
@@ -465,6 +326,200 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
             Style::default().fg(Color::Gray),
         )));
     }
+
+    let area_width = (frame.area().width.saturating_mul(70) / 100)
+        .min(frame.area().width.saturating_sub(2))
+        .max(30);
+    let pad = 1u16;
+    let content_width = area_width.saturating_sub(2 + pad * 2);
+    let value_width = content_width
+        .saturating_sub((2 + LABEL_WIDTH as u16 + 2) as u16) as usize;
+    let max_height = frame.area().height.saturating_mul(70) / 100;
+
+    let title = if app.edit_index.is_some() {
+        "Edit connection"
+    } else {
+        "New connection"
+    };
+    let block = Block::default()
+        .title(Line::from(Span::styled(
+            title,
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL);
+
+    let mut lines = Vec::new();
+    let name_row;
+    let user_row;
+    let host_row;
+    let auth_row;
+    let mut key_row = None;
+    let mut pass_row = None;
+    let action_test_row;
+    let action_save_row;
+    let mut row_idx = 0usize;
+
+    name_row = Some(row_idx);
+    lines.push(field_line(
+        "Name",
+        &app.new_connection.name,
+        app.new_connection.active_field == Field::Name,
+        false,
+        LABEL_WIDTH,
+        value_width,
+    ));
+    row_idx += 1;
+
+    user_row = Some(row_idx);
+    lines.push(field_line(
+        "User",
+        &app.new_connection.user,
+        app.new_connection.active_field == Field::User,
+        false,
+        LABEL_WIDTH,
+        value_width,
+    ));
+    row_idx += 1;
+
+    host_row = Some(row_idx);
+    lines.push(field_line(
+        "Host",
+        &app.new_connection.host,
+        app.new_connection.active_field == Field::Host,
+        false,
+        LABEL_WIDTH,
+        value_width,
+    ));
+    row_idx += 1;
+
+    auth_row = Some(row_idx);
+    lines.push(field_line(
+        "Auth",
+        auth_kind_label(app.new_connection.auth_kind),
+        app.new_connection.active_field == Field::AuthType,
+        false,
+        LABEL_WIDTH,
+        value_width,
+    ));
+    row_idx += 1;
+    if matches!(
+        app.new_connection.auth_kind,
+        AuthKind::PrivateKey | AuthKind::PrivateKeyWithPassword
+    ) {
+        key_row = Some(row_idx);
+        lines.push(field_line(
+            "Key path",
+            &app.new_connection.key_path,
+            app.new_connection.active_field == Field::KeyPath,
+            false,
+            LABEL_WIDTH,
+            value_width,
+        ));
+        row_idx += 1;
+    }
+    if matches!(
+        app.new_connection.auth_kind,
+        AuthKind::PasswordOnly | AuthKind::PrivateKeyWithPassword
+    ) {
+        pass_row = Some(row_idx);
+        lines.push(field_line(
+            "Password",
+            &app.new_connection.password,
+            app.new_connection.active_field == Field::Password,
+            true,
+            LABEL_WIDTH,
+            value_width,
+        ));
+        row_idx += 1;
+    }
+
+    lines.push(Line::from(""));
+    row_idx += 1;
+    action_test_row = Some(row_idx);
+    lines.push(action_line(
+        "Test connection",
+        app.new_connection.active_field == Field::ActionTest,
+    ));
+    row_idx += 1;
+    action_save_row = Some(row_idx);
+    lines.push(action_line(
+        "Save connection",
+        app.new_connection.active_field == Field::ActionSave,
+    ));
+
+    if let Some(message) = &app.new_connection_feedback {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            message.as_str(),
+            Style::default().fg(Color::Red),
+        )));
+    }
+
+    let content_lines = lines.len();
+    let desired_height = modal_height(content_lines, footer_lines.len());
+    let area_height = desired_height
+        .max(10)
+        .min(max_height.max(10))
+        .min(frame.area().height.saturating_sub(2));
+    let area = centered_rect_abs(area_width, area_height, frame.area());
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+    let inner = padded_rect(area, pad);
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(footer_lines.len() as u16),
+        ]
+        .as_ref())
+        .split(inner);
+
+    let active_row = match app.new_connection.active_field {
+        Field::Name => name_row,
+        Field::User => user_row,
+        Field::Host => host_row,
+        Field::AuthType => auth_row,
+        Field::KeyPath => key_row,
+        Field::Password => pass_row,
+        Field::ActionTest => action_test_row,
+        Field::ActionSave => action_save_row,
+    };
+    let max_visible = layout[0].height as usize;
+    let scroll = if lines.len() > max_visible {
+        let active_row = active_row.unwrap_or(0);
+        let mut offset = if active_row + 1 > max_visible {
+            active_row + 1 - max_visible
+        } else {
+            0
+        };
+        let max_offset = lines.len().saturating_sub(max_visible);
+        if offset > max_offset {
+            offset = max_offset;
+        }
+        offset
+    } else {
+        0
+    };
+    let visible_lines = if lines.len() > max_visible {
+        lines[scroll..scroll + max_visible].to_vec()
+    } else {
+        lines
+    };
+    let paragraph = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, layout[0]);
+    render_input_cursor(
+        frame,
+        app,
+        layout[0],
+        scroll,
+        name_row,
+        user_row,
+        host_row,
+        auth_row,
+        key_row,
+        pass_row,
+    );
+
     let footer = Paragraph::new(footer_lines).style(Style::default().fg(Color::Gray));
     frame.render_widget(footer, layout[1]);
 }
@@ -474,7 +529,7 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(80, 70, frame.area());
+    let area = centered_rect(80, 60, frame.area());
     frame.render_widget(Clear, area);
     let title = if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickSource) {
         "Pick source file or folder"
@@ -489,12 +544,7 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 2,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(4),
-    };
+    let inner = padded_rect(area, 1);
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -543,7 +593,7 @@ fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(70, 60, frame.area());
+    let area = centered_rect(70, 50, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -553,12 +603,7 @@ fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 2,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(4),
-    };
+    let inner = padded_rect(area, 1);
 
     let items: Vec<ListItem> = picker
         .keys
@@ -585,7 +630,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(80, 70, frame.area());
+    let area = centered_rect(80, 60, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -595,12 +640,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 2,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(4),
-    };
+    let inner = padded_rect(area, 1);
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -652,7 +692,8 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
         Some(transfer) => transfer,
         None => return,
     };
-    let area = centered_rect(70, 40, frame.area());
+    let height = modal_height(3, 1);
+    let area = centered_rect_by_height(70, height, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -662,12 +703,7 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 2,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(4),
-    };
+    let inner = padded_rect(area, 1);
 
     let source = transfer
         .source_path
@@ -695,7 +731,8 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
-    let area = centered_rect(60, 45, frame.area());
+    let height = modal_height(4, 0);
+    let area = centered_rect_by_height(60, height, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -705,13 +742,11 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 2,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(4),
-    };
+    let inner = padded_rect(area, 1);
 
+    let value_width = inner
+        .width
+        .saturating_sub((2 + LABEL_WIDTH as u16 + 2) as u16) as usize;
     let lines = vec![
         field_line(
             "Current",
@@ -719,6 +754,7 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
             app.master_change.active_field == MasterField::Current,
             true,
             LABEL_WIDTH,
+            value_width,
         ),
         field_line(
             "New",
@@ -726,6 +762,7 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
             app.master_change.active_field == MasterField::New,
             true,
             LABEL_WIDTH,
+            value_width,
         ),
         field_line(
             "Confirm",
@@ -733,6 +770,7 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
             app.master_change.active_field == MasterField::Confirm,
             true,
             LABEL_WIDTH,
+            value_width,
         ),
         Line::from(""),
         Line::from(vec![
@@ -750,7 +788,8 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_confirm_delete_modal(frame: &mut Frame<'_>, app: &App) {
-    let area = centered_rect(50, 30, frame.area());
+    let height = modal_height(3, 0);
+    let area = centered_rect_by_height(50, height, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -760,12 +799,7 @@ fn draw_confirm_delete_modal(frame: &mut Frame<'_>, app: &App) {
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 2,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(4),
-    };
+    let inner = padded_rect(area, 1);
 
     let label = app
         .delete_index
@@ -797,7 +831,8 @@ fn draw_try_result_modal(frame: &mut Frame<'_>, app: &App) {
         Some(result) => result,
         None => return,
     };
-    let area = centered_rect(50, 25, frame.area());
+    let height = modal_height(2, 1);
+    let area = centered_rect_by_height(50, height, frame.area());
     frame.render_widget(Clear, area);
     let title = if result.success { "Try success" } else { "Try failed" };
     let block = Block::default()
@@ -808,12 +843,7 @@ fn draw_try_result_modal(frame: &mut Frame<'_>, app: &App) {
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 2,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(4),
-    };
+    let inner = padded_rect(area, 1);
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -837,7 +867,10 @@ fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
         Some(notice) => notice,
         None => return,
     };
-    let area = centered_rect(50, 25, frame.area());
+    let message_lines = notice.message.lines().count().max(1);
+    let footer_lines = if app.notice_action_label().is_some() { 1 } else { 1 };
+    let height = modal_height(message_lines + footer_lines, 0);
+    let area = centered_rect_by_height(50, height, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -847,12 +880,7 @@ fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
-    let inner = Rect {
-        x: area.x + 2,
-        y: area.y + 2,
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(4),
-    };
+    let inner = padded_rect(area, 1);
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
@@ -892,12 +920,14 @@ fn field_line(
     active: bool,
     mask: bool,
     label_width: usize,
+    max_value_width: usize,
 ) -> Line<'static> {
     let display = if mask && !value.is_empty() {
         "*".repeat(value.chars().count())
     } else {
         value.to_string()
     };
+    let display = truncate_text(&display, max_value_width);
     let indicator = if active { "> " } else { "  " };
     let indicator_style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
     let spans = vec![
@@ -909,6 +939,22 @@ fn field_line(
         Span::raw(display),
     ];
     Line::from(spans)
+}
+
+fn truncate_text(value: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let count = value.chars().count();
+    if count <= max_width {
+        return value.to_string();
+    }
+    if max_width <= 3 {
+        return value.chars().take(max_width).collect();
+    }
+    let mut trimmed: String = value.chars().take(max_width - 3).collect();
+    trimmed.push_str("...");
+    trimmed
 }
 
 fn action_line(label: &str, active: bool) -> Line<'static> {
@@ -925,6 +971,7 @@ fn render_input_cursor(
     frame: &mut Frame<'_>,
     app: &App,
     area: Rect,
+    scroll: usize,
     name_row: Option<usize>,
     user_row: Option<usize>,
     host_row: Option<usize>,
@@ -944,10 +991,17 @@ fn render_input_cursor(
     let Some(row) = row else {
         return;
     };
+    if row < scroll {
+        return;
+    }
+    let visible_row = row.saturating_sub(scroll);
+    if visible_row >= area.height as usize {
+        return;
+    }
     let indicator_len = 2u16;
     let label_len = LABEL_WIDTH as u16 + 2;
     let cursor_x = area.x + indicator_len + label_len + col as u16;
-    let cursor_y = area.y + row as u16;
+    let cursor_y = area.y + visible_row as u16;
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
@@ -985,6 +1039,34 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
             .as_ref(),
         )
         .split(popup_layout[1])[1]
+}
+
+fn centered_rect_by_height(percent_x: u16, height: u16, area: Rect) -> Rect {
+    let width = (area.width * percent_x / 100).min(area.width.saturating_sub(2));
+    let height = height.min(area.height.saturating_sub(2));
+    centered_rect_abs(width, height, area)
+}
+
+fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
+    let width = width.max(10).min(area.width);
+    let height = height.max(5).min(area.height);
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    Rect { x, y, width, height }
+}
+
+fn padded_rect(area: Rect, pad: u16) -> Rect {
+    Rect {
+        x: area.x + pad,
+        y: area.y + pad,
+        width: area.width.saturating_sub(pad * 2),
+        height: area.height.saturating_sub(pad * 2),
+    }
+}
+
+fn modal_height(content_lines: usize, footer_lines: usize) -> u16 {
+    let total = content_lines + footer_lines;
+    (total as u16).saturating_add(2 + 2)
 }
 
 fn list_state(selected: usize, len: usize) -> ratatui::widgets::ListState {
