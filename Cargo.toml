@@ -1,5 +1,5 @@
 [package]
-name = "ssh-client"
+name = "super-simple-ssh-client"
 version = "0.1.0"
 edition = "2024"
 authors = ["hansen_docked_in <hansdrum@proton.me>"]

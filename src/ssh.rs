@@ -134,46 +134,6 @@ pub(crate) fn run_ssh_terminal(session: &Session) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn transfer_path(
-    session: &Session,
-    source: &Path,
-    target_dir: &str,
-    source_is_dir: bool,
-) -> Result<()> {
-    let sftp = session.sftp().context("open sftp")?;
-    let name = source
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .ok_or_else(|| anyhow::anyhow!("missing source filename"))?;
-    let remote_base = format!("{}/{}", target_dir.trim_end_matches('/'), name);
-    if source_is_dir {
-        upload_dir(&sftp, source, &remote_base)?;
-    } else {
-        upload_file(&sftp, source, &remote_base)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn download_path(
-    session: &Session,
-    source: &str,
-    target_dir: &Path,
-    source_is_dir: bool,
-) -> Result<()> {
-    let sftp = session.sftp().context("open sftp")?;
-    let name = Path::new(source)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .ok_or_else(|| anyhow::anyhow!("missing source filename"))?;
-    let local_base = target_dir.join(name);
-    if source_is_dir {
-        download_dir(&sftp, source, &local_base)?;
-    } else {
-        download_file(&sftp, source, &local_base)?;
-    }
-    Ok(())
-}
-
 pub(crate) fn remote_size(session: &Session, path: &str, is_dir: bool) -> Result<u64> {
     let sftp = session.sftp().context("open sftp")?;
     if !is_dir {
@@ -218,44 +178,6 @@ pub(crate) fn remote_has_subdirs(session: &Session, path: &str) -> Result<bool> 
     Ok(false)
 }
 
-fn download_dir(sftp: &ssh2::Sftp, remote_dir: &str, local_dir: &Path) -> Result<()> {
-    std::fs::create_dir_all(local_dir).context("create local dir")?;
-    for (path, stat) in sftp
-        .readdir(Path::new(remote_dir))
-        .context("read remote dir")?
-    {
-        let name = path
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| String::from("/"));
-        if name == "." || name == ".." {
-            continue;
-        }
-        let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
-        let remote_path = if remote_dir.ends_with('/') {
-            format!("{remote_dir}{name}")
-        } else {
-            format!("{remote_dir}/{name}")
-        };
-        let local_path = local_dir.join(&name);
-        if is_dir {
-            download_dir(sftp, &remote_path, &local_path)?;
-        } else {
-            download_file(sftp, &remote_path, &local_path)?;
-        }
-    }
-    Ok(())
-}
-
-fn download_file(sftp: &ssh2::Sftp, remote_path: &str, local_path: &Path) -> Result<()> {
-    let mut remote = sftp
-        .open(Path::new(remote_path))
-        .context("open remote file")?;
-    let mut local = File::create(local_path).context("create local file")?;
-    io::copy(&mut remote, &mut local).context("copy file")?;
-    Ok(())
-}
-
 pub(crate) fn transfer_path_with_progress(
     session: &Session,
     source: &Path,
@@ -297,36 +219,6 @@ pub(crate) fn download_path_with_progress(
     } else {
         download_file_with_progress(&sftp, source, &local_base, tx, cancel_rx)?;
     }
-    Ok(())
-}
-
-fn upload_dir(sftp: &ssh2::Sftp, local_dir: &Path, remote_dir: &str) -> Result<()> {
-    let _ = sftp.mkdir(Path::new(remote_dir), 0o755);
-    for entry in std::fs::read_dir(local_dir).context("read local dir")? {
-        let entry = entry.context("read local dir entry")?;
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let remote_path = format!("{remote_dir}/{name}");
-        if path.is_dir() {
-            upload_dir(sftp, &path, &remote_path)?;
-        } else {
-            upload_file(sftp, &path, &remote_path)?;
-        }
-    }
-    Ok(())
-}
-
-fn upload_file(sftp: &ssh2::Sftp, local_path: &Path, remote_path: &str) -> Result<()> {
-    let mut local = File::open(local_path).context("open local file")?;
-    let mut remote = sftp
-        .open_mode(
-            Path::new(remote_path),
-            ssh2::OpenFlags::CREATE | ssh2::OpenFlags::TRUNCATE | ssh2::OpenFlags::WRITE,
-            0o644,
-            ssh2::OpenType::File,
-        )
-        .context("open remote file")?;
-    io::copy(&mut local, &mut remote).context("copy file")?;
     Ok(())
 }
 

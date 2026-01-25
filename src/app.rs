@@ -206,9 +206,9 @@ impl App {
         let timestamp = chrono::Local::now().format("%m-%d %H:%M:%S");
         let line = format!("{timestamp} | {message}");
         if let Some(parent) = self.log_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            let _ = fs::create_dir_all(parent);
         }
-        if let Ok(mut file) = std::fs::OpenOptions::new()
+        if let Ok(mut file) = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.log_path)
@@ -1535,52 +1535,6 @@ impl App {
         }
     }
 
-    fn execute_transfer(&mut self) -> Result<()> {
-        let Some(transfer) = self.transfer.take() else {
-            return Ok(());
-        };
-        let Some(conn) = self.selected_connected_connection() else {
-            anyhow::bail!("Selected connection is not connected");
-        };
-        let open_conn = self
-            .open_connections
-            .iter()
-            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
-            .context("selected connection is not connected")?;
-        match transfer.direction {
-            TransferDirection::Upload => {
-                let Some(source) = transfer.source_path else {
-                    anyhow::bail!("Missing source");
-                };
-                let Some(target_dir) = transfer.target_dir else {
-                    anyhow::bail!("Missing target");
-                };
-                crate::ssh::transfer_path(
-                    &open_conn.session,
-                    &source,
-                    &target_dir,
-                    transfer.source_is_dir,
-                )?;
-            }
-            TransferDirection::Download => {
-                let Some(source) = transfer.source_remote else {
-                    anyhow::bail!("Missing source");
-                };
-                let Some(target_dir) = transfer.target_local_dir else {
-                    anyhow::bail!("Missing target");
-                };
-                crate::ssh::download_path(
-                    &open_conn.session,
-                    &source,
-                    &target_dir,
-                    transfer.source_is_dir,
-                )?;
-            }
-        }
-        self.set_status("Transfer completed");
-        Ok(())
-    }
-
     fn selected_connected_connection(&self) -> Option<ConnectionConfig> {
         let conn = self.connections.get(self.selected_saved)?;
         if self
@@ -1777,31 +1731,10 @@ fn resolve_picker_start(current: &str) -> Result<PathBuf> {
     std::env::current_dir().context("current dir")
 }
 
-fn load_last_log(path: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
-    content
-        .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())
-        .map(|line| line.to_string())
-}
 
-fn load_log_lines(path: &Path, max_lines: usize) -> VecDeque<String> {
-    let mut lines = VecDeque::new();
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return lines;
-    };
-    for line in content.lines().filter(|line| !line.trim().is_empty()) {
-        lines.push_back(line.to_string());
-        if lines.len() > max_lines {
-            lines.pop_front();
-        }
-    }
-    lines
-}
 
 fn prune_log_file(path: &Path, days: i64, max_entries: usize) {
-    let Ok(content) = std::fs::read_to_string(path) else {
+    let Ok(content) = fs::read_to_string(path) else {
         return;
     };
     let cutoff = chrono::Local::now().naive_local() - chrono::Duration::days(days);
@@ -1821,10 +1754,10 @@ fn prune_log_file(path: &Path, days: i64, max_entries: usize) {
         kept = kept.split_off(kept.len().saturating_sub(max_entries));
     }
     if kept.is_empty() {
-        let _ = std::fs::remove_file(path);
+        let _ = fs::remove_file(path);
     } else if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-        let _ = std::fs::write(path, kept.join("\n") + "\n");
+        let _ = fs::create_dir_all(parent);
+        let _ = fs::write(path, kept.join("\n") + "\n");
     }
 }
 
