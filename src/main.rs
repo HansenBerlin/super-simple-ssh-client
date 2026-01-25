@@ -50,7 +50,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
     loop {
         let (_, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-        let details_height = if app.header_mode != crate::app::HeaderMode::Off {
+        let details_height = if app.header_mode != app::HeaderMode::Off {
             rows.saturating_sub(3)
         } else {
             rows

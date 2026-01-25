@@ -171,7 +171,6 @@ impl App {
                 .is_some_and(|t| t.step == TransferStep::Transferring)
                 && self.transfer_hidden
             {
-                // Allow normal navigation while transfer runs in background.
             } else if matches!(
                 self.transfer.as_ref().map(|t| t.step),
                 Some(TransferStep::Confirm | TransferStep::Transferring)
@@ -926,8 +925,8 @@ impl App {
                     if let Some(entry) = picker.entries.get(picker.selected).cloned() {
                         if entry.is_dir {
                             if only_dirs {
-                                let subdirs = read_dir_entries_filtered(&entry.path, true)?;
-                                if subdirs.is_empty() {
+                                let subdirectories = read_dir_entries_filtered(&entry.path, true)?;
+                                if subdirectories.is_empty() {
                                     self.notice = Some(Notice {
                                         title: "No subfolders".to_string(),
                                         message: "This folder has no subfolders. To select it as the target, press S.".to_string(),
@@ -1067,7 +1066,10 @@ impl App {
                                     return Ok(false);
                                 }
                             };
-                            if !crate::ssh::remote_has_subdirs(&open_conn.session, &entry.path)? {
+                            if !crate::ssh::remote_has_subdirectories(
+                                &open_conn.session,
+                                &entry.path,
+                            )? {
                                 self.notice = Some(Notice {
                                     title: "No subfolders".to_string(),
                                     message: "This folder has no subfolders. To select it as the target, press S.".to_string(),

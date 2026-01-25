@@ -314,7 +314,7 @@ fn draw_open_tabs(
                                 .title(Line::from(Span::styled(
                                     "Logs",
                                     Style::default()
-                                        .fg(Color::Yellow)
+                                        .fg(Color::Magenta)
                                         .add_modifier(Modifier::BOLD),
                                 )))
                                 .borders(Borders::ALL),
@@ -385,7 +385,7 @@ fn draw_open_tabs(
         let start_end = app.history_range(history_len, app.last_error.contains_key(&key));
         let start = start_end.0;
         let end = start_end.1;
-        let page_size = (end.saturating_sub(start)).max(1);
+        let page_size = end.saturating_sub(start).max(1);
         let max_page = history_len.saturating_sub(1) / page_size;
         let page = app.history_page.min(max_page) + 1;
         let total_pages = max_page + 1;
@@ -470,7 +470,7 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         .max(30);
     let pad = 1u16;
     let content_width = area_width.saturating_sub(2 + pad * 2);
-    let value_width = content_width.saturating_sub((2 + LABEL_WIDTH as u16 + 2) as u16) as usize;
+    let value_width = content_width.saturating_sub(2 + LABEL_WIDTH as u16 + 2) as usize;
     let max_height = frame.area().height.saturating_mul(70) / 100;
 
     let title = if app.edit_index.is_some() {
@@ -587,7 +587,7 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
     }
 
     let content_lines = lines.len();
-    let desired_height = modal_height(content_lines, footer_lines.len());
+    let desired_height = modal_height(content_lines, footer_lines.len() + 1);
     let area_height = desired_height
         .max(10)
         .min(max_height.max(10))
@@ -599,7 +599,7 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         .constraints(
             [
                 Constraint::Min(1),
-                Constraint::Length(footer_lines.len() as u16),
+                Constraint::Length(footer_lines.len() as u16 + 1),
             ]
             .as_ref(),
         )
@@ -642,7 +642,9 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         frame, app, layout[0], scroll, name_row, user_row, host_row, auth_row, key_row, pass_row,
     );
 
-    let footer = Paragraph::new(footer_lines).style(Style::default().fg(Color::Gray));
+    let footer = Paragraph::new(footer_lines)
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::TOP));
     frame.render_widget(footer, layout[1]);
 }
 
@@ -687,7 +689,7 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
             [
                 Constraint::Length(1),
                 Constraint::Min(3),
-                Constraint::Length(1),
+                Constraint::Length(2),
             ]
             .as_ref(),
         )
@@ -711,7 +713,6 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
     };
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol(Span::styled("> ", Style::default().fg(Color::White)));
     frame.render_stateful_widget(
@@ -720,7 +721,9 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
         &mut list_state(picker.selected, picker.entries.len()),
     );
 
-    let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::Gray));
+    let footer = Paragraph::new(footer_text)
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::TOP));
     frame.render_widget(footer, layout[2]);
 }
 
@@ -802,7 +805,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
             [
                 Constraint::Length(1),
                 Constraint::Min(3),
-                Constraint::Length(1),
+                Constraint::Length(2),
             ]
             .as_ref(),
         )
@@ -833,7 +836,6 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         frame.render_widget(error, layout[1]);
     } else {
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
             .highlight_symbol(Span::styled("> ", Style::default().fg(Color::White)));
         frame.render_stateful_widget(
@@ -843,7 +845,9 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         );
     }
 
-    let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::Gray));
+    let footer = Paragraph::new(footer_text)
+        .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::TOP));
     frame.render_widget(footer, layout[2]);
 }
 
@@ -854,7 +858,7 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
     };
     let transferring = transfer.step == crate::model::TransferStep::Transferring;
     let content_lines = if transferring { 4 } else { 3 };
-    let height = modal_height(content_lines + 2, 1);
+    let height = modal_height(content_lines + 2, 2);
     let area = centered_rect_by_height(70, height, frame.area());
     let border_style = Style::default();
     let back_label = "to go back to target";
@@ -930,7 +934,7 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
                 [
                     Constraint::Min(3),
                     Constraint::Length(1),
-                    Constraint::Length(1),
+                    Constraint::Length(2),
                 ]
                 .as_ref(),
             )
@@ -938,7 +942,7 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
     } else {
         Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(1)].as_ref())
+            .constraints([Constraint::Min(3), Constraint::Length(2)].as_ref())
             .split(inner)
     };
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
@@ -973,6 +977,7 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
             Span::raw(" to cancel"),
         ]))
         .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::TOP))
     } else {
         Paragraph::new(Line::from(vec![
             Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
@@ -985,13 +990,14 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
             Span::raw(" to cancel"),
         ]))
         .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::TOP))
     };
     let footer_area = if transferring { layout[2] } else { layout[1] };
     frame.render_widget(footer, footer_area);
 }
 
 fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
-    let height = modal_height(6, 1);
+    let height = modal_height(6, 2);
     let area = centered_rect_by_height(60, height, frame.area());
     let inner = draw_popup_frame(
         frame,
@@ -1001,12 +1007,10 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
     );
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)].as_ref())
+        .constraints([Constraint::Min(1), Constraint::Length(2)].as_ref())
         .split(inner);
 
-    let value_width = layout[0]
-        .width
-        .saturating_sub((2 + LABEL_WIDTH as u16 + 2) as u16) as usize;
+    let value_width = layout[0].width.saturating_sub(2 + LABEL_WIDTH as u16 + 2) as usize;
     let mut lines = Vec::new();
     let current_row = Some(0usize);
     let new_row = Some(1usize);
@@ -1056,12 +1060,13 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
         Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to cancel"),
     ]))
-    .style(Style::default().fg(Color::Gray));
+    .style(Style::default().fg(Color::Gray))
+    .block(Block::default().borders(Borders::TOP));
     frame.render_widget(footer, layout[1]);
 }
 
 fn draw_confirm_delete_modal(frame: &mut Frame<'_>, app: &App) {
-    let height = modal_height(3, 0);
+    let height = modal_height(1, 2);
     let area = centered_rect_by_height(50, height, frame.area());
     let inner = draw_popup_frame(
         frame,
@@ -1076,23 +1081,27 @@ fn draw_confirm_delete_modal(frame: &mut Frame<'_>, app: &App) {
         .map(|conn| conn.label())
         .unwrap_or_else(|| "Unknown".to_string());
 
-    let lines = vec![
-        Line::from(format!("Delete {label}?")),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" or "),
-            Span::styled("Y", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to confirm, "),
-            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" or "),
-            Span::styled("N", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to cancel"),
-        ]),
-    ];
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(2)].as_ref())
+        .split(inner);
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, inner);
+    let message = Paragraph::new(format!("Delete {label}?")).wrap(Wrap { trim: true });
+    frame.render_widget(message, layout[0]);
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" or "),
+        Span::styled("Y", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" to confirm, "),
+        Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" or "),
+        Span::styled("N", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" to cancel"),
+    ]))
+    .style(Style::default().fg(Color::Gray))
+    .block(Block::default().borders(Borders::TOP));
+    frame.render_widget(footer, layout[1]);
 }
 
 fn draw_try_result_modal(frame: &mut Frame<'_>, app: &App) {
@@ -1100,7 +1109,7 @@ fn draw_try_result_modal(frame: &mut Frame<'_>, app: &App) {
         Some(result) => result,
         None => return,
     };
-    let height = modal_height(2, 1);
+    let height = modal_height(2, 2);
     let area = centered_rect_by_height(50, height, frame.area());
     let title = if result.success {
         "Try success"
@@ -1122,7 +1131,8 @@ fn draw_try_result_modal(frame: &mut Frame<'_>, app: &App) {
         Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to close."),
     ]))
-    .style(Style::default().fg(Color::Gray));
+    .style(Style::default().fg(Color::Gray))
+    .block(Block::default().borders(Borders::TOP));
     frame.render_widget(footer, layout[1]);
 }
 
@@ -1137,7 +1147,7 @@ fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
     } else {
         1
     };
-    let height = modal_height(message_lines + footer_lines + 2, 0);
+    let height = modal_height(message_lines + footer_lines + 2, 1);
     let area = centered_rect_by_height(50, height, frame.area());
     let inner = draw_popup_frame(
         frame,
@@ -1167,6 +1177,7 @@ fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
             Span::raw(" to close."),
         ]))
         .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::TOP))
     } else {
         Paragraph::new(Line::from(vec![
             Span::raw("Press "),
@@ -1174,6 +1185,7 @@ fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
             Span::raw(" to close."),
         ]))
         .style(Style::default().fg(Color::Gray))
+        .block(Block::default().borders(Borders::TOP))
     };
     frame.render_widget(footer, layout[1]);
 }

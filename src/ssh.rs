@@ -167,7 +167,7 @@ pub(crate) fn remote_size(session: &Session, path: &str, is_dir: bool) -> Result
     walk(&sftp, path)
 }
 
-pub(crate) fn remote_has_subdirs(session: &Session, path: &str) -> Result<bool> {
+pub(crate) fn remote_has_subdirectories(session: &Session, path: &str) -> Result<bool> {
     let sftp = session.sftp().context("open sftp")?;
     for (_child, stat) in sftp.readdir(Path::new(path)).context("read remote dir")? {
         let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
