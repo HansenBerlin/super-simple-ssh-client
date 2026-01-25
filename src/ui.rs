@@ -220,7 +220,14 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(3)].as_ref())
+        .constraints(
+            [
+                Constraint::Min(3),
+                Constraint::Length(3),
+                Constraint::Length(2),
+            ]
+            .as_ref(),
+        )
         .split(inner);
 
     let mut lines = Vec::new();
@@ -280,22 +287,31 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
     frame.render_widget(paragraph, layout[0]);
 
+    let actions = vec![
+        action_line(
+            "Test connection",
+            app.new_connection.active_field == Field::ActionTest,
+        ),
+        action_line(
+            "Save connection",
+            app.new_connection.active_field == Field::ActionSave,
+        ),
+    ];
+    let actions_paragraph = Paragraph::new(actions).wrap(Wrap { trim: true });
+    frame.render_widget(actions_paragraph, layout[1]);
+
     let footer = Paragraph::new(Line::from(vec![
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" or "),
+        Span::styled("Up/Down", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to move, "),
         Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(if app.edit_index.is_some() {
-            " to save, "
-        } else {
-            " to connect, "
-        }),
-        Span::styled("T", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to try, "),
+        Span::raw(" to select, "),
         Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to cancel"),
     ]))
     .style(Style::default().fg(Color::Gray));
-    frame.render_widget(footer, layout[1]);
+    frame.render_widget(footer, layout[2]);
 }
 
 fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
@@ -529,6 +545,16 @@ fn field_line(label: &str, value: &str, active: bool, mask: bool) -> Line<'stati
     ];
     Line::from(spans)
 }
+
+fn action_line(label: &str, active: bool) -> Line<'static> {
+    let indicator = if active { "> " } else { "  " };
+    let spans = vec![
+        Span::styled(indicator, Style::default().fg(Color::Yellow)),
+        Span::styled(label.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+    ];
+    Line::from(spans)
+}
+
 
 fn auth_kind_label(kind: AuthKind) -> &'static str {
     match kind {

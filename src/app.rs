@@ -223,8 +223,8 @@ impl App {
                 self.new_connection_feedback = None;
                 self.status = "Cancelled".to_string();
             }
-            KeyCode::Tab => self.advance_field(true),
-            KeyCode::BackTab => self.advance_field(false),
+            KeyCode::Tab | KeyCode::Down => self.advance_field(true),
+            KeyCode::BackTab | KeyCode::Up => self.advance_field(false),
             KeyCode::Left | KeyCode::Right => {
                 if self.new_connection.active_field == Field::AuthType {
                     let next = match (self.new_connection.auth_kind, key.code) {
@@ -244,48 +244,11 @@ impl App {
                     self.open_file_picker()?;
                 }
             }
-            KeyCode::Char('t') => {
-                match self.build_new_config() {
-                    Ok(config) => {
-                        self.try_result = Some(match self.try_connect(&config) {
-                            Ok(()) => TryResult {
-                                success: true,
-                                message: "Connection OK (not saved)".to_string(),
-                            },
-                            Err(err) => TryResult {
-                                success: false,
-                                message: format!("Connection failed: {err}"),
-                            },
-                        });
-                    }
-                    Err(err) => {
-                        self.try_result = Some(TryResult {
-                            success: false,
-                            message: format!("Missing fields: {err}"),
-                        });
-                    }
-                }
-            }
             KeyCode::Enter => {
-                match self.build_new_config() {
-                    Ok(config) => {
-                        let snapshot = config.clone();
-                        match self.save_or_connect(config) {
-                            Ok(()) => {
-                                self.mode = Mode::Normal;
-                                self.edit_index = None;
-                                self.new_connection_feedback = None;
-                            }
-                            Err(err) => {
-                                self.record_connect_error(&snapshot, &err);
-                                self.new_connection_feedback =
-                                    Some(format!("Connection failed: {err}"));
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        self.new_connection_feedback = Some(format!("Missing fields: {err}"));
-                    }
+                match self.new_connection.active_field {
+                    Field::ActionTest => self.run_test_connection(),
+                    Field::ActionSave => self.run_save_connection(),
+                    _ => {}
                 }
             }
             KeyCode::Backspace => {
@@ -469,6 +432,8 @@ impl App {
                 fields.push(Field::Password);
             }
         }
+        fields.push(Field::ActionTest);
+        fields.push(Field::ActionSave);
         fields
     }
 
@@ -478,6 +443,7 @@ impl App {
             Field::Host => &mut self.new_connection.host,
             Field::KeyPath => &mut self.new_connection.key_path,
             Field::Password => &mut self.new_connection.password,
+            Field::ActionTest | Field::ActionSave => return,
             Field::AuthType => return,
         };
         match action {
@@ -656,6 +622,52 @@ impl App {
     fn try_connect(&self, config: &ConnectionConfig) -> Result<()> {
         let _session = connect_ssh(config)?;
         Ok(())
+    }
+
+    fn run_test_connection(&mut self) {
+        match self.build_new_config() {
+            Ok(config) => {
+                self.try_result = Some(match self.try_connect(&config) {
+                    Ok(()) => TryResult {
+                        success: true,
+                        message: "Connection OK (not saved)".to_string(),
+                    },
+                    Err(err) => TryResult {
+                        success: false,
+                        message: format!("Connection failed: {err}"),
+                    },
+                });
+            }
+            Err(err) => {
+                self.try_result = Some(TryResult {
+                    success: false,
+                    message: format!("Missing fields: {err}"),
+                });
+            }
+        }
+    }
+
+    fn run_save_connection(&mut self) {
+        match self.build_new_config() {
+            Ok(config) => {
+                let snapshot = config.clone();
+                match self.save_or_connect(config) {
+                    Ok(()) => {
+                        self.mode = Mode::Normal;
+                        self.edit_index = None;
+                        self.new_connection_feedback = None;
+                    }
+                    Err(err) => {
+                        self.record_connect_error(&snapshot, &err);
+                        self.new_connection_feedback =
+                            Some(format!("Connection failed: {err}"));
+                    }
+                }
+            }
+            Err(err) => {
+                self.new_connection_feedback = Some(format!("Missing fields: {err}"));
+            }
+        }
     }
 
     fn prefill_new_connection(&self, config: &ConnectionConfig) -> NewConnectionState {

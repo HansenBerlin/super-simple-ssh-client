@@ -123,6 +123,8 @@ pub(crate) enum Field {
     AuthType,
     KeyPath,
     Password,
+    ActionTest,
+    ActionSave,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
