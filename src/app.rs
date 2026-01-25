@@ -45,7 +45,8 @@ pub(crate) struct App {
     pub(crate) notice: Option<Notice>,
     pub(crate) show_help: bool,
     pub(crate) show_header: bool,
-    pub(crate) details_scroll: u16,
+    pub(crate) history_page: usize,
+    pub(crate) details_height: u16,
 }
 
 impl App {
@@ -74,8 +75,9 @@ impl App {
             new_connection_feedback: None,
             notice: None,
             show_help: true,
-            details_scroll: 0,
             show_header: true,
+            history_page: 0,
+            details_height: 0,
         })
     }
 
@@ -190,32 +192,43 @@ impl App {
                     self.status = "Confirm delete".to_string();
                 }
             }
-            KeyCode::PageUp => {
-                self.details_scroll = self.details_scroll.saturating_sub(1);
+            KeyCode::Tab => {
+                if self.selected_saved + 1 < self.connections.len() {
+                    self.selected_saved += 1;
+                    self.history_page = 0;
+                }
             }
-            KeyCode::PageDown => {
-                self.details_scroll = self.details_scroll.saturating_add(1);
+            KeyCode::BackTab => {
+                if self.selected_saved > 0 {
+                    self.selected_saved -= 1;
+                    self.history_page = 0;
+                }
             }
             KeyCode::Up => {
                 if self.selected_saved > 0 {
                     self.selected_saved -= 1;
-                    self.details_scroll = 0;
+                    self.history_page = 0;
                 }
             }
             KeyCode::Down => {
                 if self.selected_saved + 1 < self.connections.len() {
                     self.selected_saved += 1;
-                    self.details_scroll = 0;
+                    self.history_page = 0;
                 }
             }
             KeyCode::Left => {
-                if self.selected_tab > 0 {
-                    self.selected_tab -= 1;
+                if self.history_page > 0 {
+                    self.history_page -= 1;
                 }
             }
             KeyCode::Right => {
-                if self.selected_tab + 1 < self.open_connections.len() {
-                    self.selected_tab += 1;
+                if let Some(conn) = self.connections.get(self.selected_saved) {
+                    let key = crate::model::connection_key(conn);
+                    let has_error = self.last_error.contains_key(&key);
+                    let max_page = self.max_history_page(conn.history.len(), has_error);
+                    if self.history_page < max_page {
+                        self.history_page += 1;
+                    }
                 }
             }
             _ => {}
@@ -691,6 +704,41 @@ impl App {
     fn try_connect(&self, config: &ConnectionConfig) -> Result<()> {
         let _session = connect_ssh(config)?;
         Ok(())
+    }
+
+    pub(crate) fn set_details_height(&mut self, height: u16) {
+        self.details_height = height;
+    }
+
+    pub(crate) fn history_range(
+        &self,
+        history_len: usize,
+        has_error: bool,
+    ) -> (usize, usize) {
+        let page_size = self.history_page_size(has_error);
+        if history_len == 0 {
+            return (0, 0);
+        }
+        let max_page = (history_len - 1) / page_size;
+        let page = self.history_page.min(max_page);
+        let start = page * page_size;
+        let end = (start + page_size).min(history_len);
+        (start, end)
+    }
+
+    fn max_history_page(&self, history_len: usize, has_error: bool) -> usize {
+        let page_size = self.history_page_size(has_error);
+        if history_len == 0 {
+            return 0;
+        }
+        (history_len - 1) / page_size
+    }
+
+    fn history_page_size(&self, has_error: bool) -> usize {
+        let inner_height = self.details_height.saturating_sub(2) as usize;
+        let base_lines = 4 + usize::from(has_error);
+        let pre_history = base_lines + 2;
+        inner_height.saturating_sub(pre_history).max(1)
     }
 
     fn run_test_connection(&mut self) {

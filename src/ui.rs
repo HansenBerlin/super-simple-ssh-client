@@ -11,6 +11,7 @@ use crate::model::{AuthConfig, AuthKind, Field, MasterField, Mode};
 
 const HELP_TEXT: &str =
     "n = new | e = edit | c = connect | d = disconnect | t = terminal | m = master pw | x = delete | h = toggle header | q = quit";
+const LABEL_WIDTH: usize = 9;
 
 pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
     let layout = Layout::default()
@@ -217,6 +218,14 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ]));
         }
 
+        let history_len = conn.history.len();
+        let start_end = app.history_range(
+            history_len,
+            app.last_error.contains_key(&key),
+        );
+        let start = start_end.0;
+        let end = start_end.1;
+
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "Past connections:",
@@ -225,7 +234,7 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
         if conn.history.is_empty() {
             lines.push(Line::from("  (none)"));
         } else {
-            for entry in conn.history.iter().rev() {
+            for entry in conn.history.iter().rev().skip(start).take(end - start) {
                 lines.push(Line::from(format!(
                     "  {}",
                     crate::model::format_history_entry(entry)
@@ -243,7 +252,6 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     ))),
             )
             .wrap(Wrap { trim: true })
-            .scroll((app.details_scroll, 0))
     } else {
         Paragraph::new("No saved connection selected")
             .block(
@@ -289,48 +297,72 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         .split(inner);
 
     let mut lines = Vec::new();
+    let user_row;
+    let host_row;
+    let auth_row;
+    let mut key_row = None;
+    let mut pass_row = None;
+    let mut row_idx = 0usize;
+
+    user_row = Some(row_idx);
     lines.push(field_line(
         "User",
         &app.new_connection.user,
         app.new_connection.active_field == Field::User,
         false,
+        LABEL_WIDTH,
     ));
+    row_idx += 1;
+
+    host_row = Some(row_idx);
     lines.push(field_line(
         "Host",
         &app.new_connection.host,
         app.new_connection.active_field == Field::Host,
         false,
+        LABEL_WIDTH,
     ));
+    row_idx += 1;
+
+    auth_row = Some(row_idx);
     lines.push(field_line(
         "Auth",
         auth_kind_label(app.new_connection.auth_kind),
         app.new_connection.active_field == Field::AuthType,
         false,
+        LABEL_WIDTH,
     ));
+    row_idx += 1;
     if matches!(
         app.new_connection.auth_kind,
         AuthKind::PrivateKey | AuthKind::PrivateKeyWithPassword
     ) {
+        key_row = Some(row_idx);
         lines.push(field_line(
             "Key path",
             &app.new_connection.key_path,
             app.new_connection.active_field == Field::KeyPath,
             false,
+            LABEL_WIDTH,
         ));
+        row_idx += 1;
         lines.push(Line::from(Span::styled(
             "F2 to browse for key file | F3 to pick from recent keys",
             Style::default().fg(Color::Gray),
         )));
+        row_idx += 1;
     }
     if matches!(
         app.new_connection.auth_kind,
         AuthKind::PasswordOnly | AuthKind::PrivateKeyWithPassword
     ) {
+        pass_row = Some(row_idx);
         lines.push(field_line(
             "Password",
             &app.new_connection.password,
             app.new_connection.active_field == Field::Password,
             true,
+            LABEL_WIDTH,
         ));
     }
 
@@ -357,6 +389,16 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
     frame.render_widget(paragraph, layout[0]);
+    render_input_cursor(
+        frame,
+        app,
+        layout[0],
+        user_row,
+        host_row,
+        auth_row,
+        key_row,
+        pass_row,
+    );
 
     let footer = Paragraph::new(Line::from(vec![
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
@@ -497,18 +539,21 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
             &app.master_change.current,
             app.master_change.active_field == MasterField::Current,
             true,
+            LABEL_WIDTH,
         ),
         field_line(
             "New",
             &app.master_change.new_password,
             app.master_change.active_field == MasterField::New,
             true,
+            LABEL_WIDTH,
         ),
         field_line(
             "Confirm",
             &app.master_change.confirm,
             app.master_change.active_field == MasterField::Confirm,
             true,
+            LABEL_WIDTH,
         ),
         Line::from(""),
         Line::from(vec![
@@ -647,17 +692,24 @@ fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(footer, layout[1]);
 }
 
-fn field_line(label: &str, value: &str, active: bool, mask: bool) -> Line<'static> {
+fn field_line(
+    label: &str,
+    value: &str,
+    active: bool,
+    mask: bool,
+    label_width: usize,
+) -> Line<'static> {
     let display = if mask && !value.is_empty() {
         "*".repeat(value.chars().count())
     } else {
         value.to_string()
     };
-    let indicator = if active { "> " } else { "  " };
+    let indicator = if active { ">" } else { " " };
     let spans = vec![
         Span::styled(indicator, Style::default().fg(Color::Yellow)),
+        Span::raw(" "),
         Span::styled(
-            format!("{label}: "),
+            format!("{label:<label_width$}: "),
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::raw(display),
@@ -666,13 +718,43 @@ fn field_line(label: &str, value: &str, active: bool, mask: bool) -> Line<'stati
 }
 
 fn action_line(label: &str, active: bool) -> Line<'static> {
-    let indicator = if active { "> " } else { "  " };
+    let indicator = if active { ">" } else { " " };
     let spans = vec![
         Span::styled(indicator, Style::default().fg(Color::Yellow)),
-        Span::styled(label.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" "),
+        Span::styled(format!("{label}"), Style::default().add_modifier(Modifier::BOLD)),
     ];
     Line::from(spans)
 }
+
+fn render_input_cursor(
+    frame: &mut Frame<'_>,
+    app: &App,
+    area: Rect,
+    user_row: Option<usize>,
+    host_row: Option<usize>,
+    _auth_row: Option<usize>,
+    key_row: Option<usize>,
+    pass_row: Option<usize>,
+) {
+    let (row, col) = match app.new_connection.active_field {
+        Field::User => (user_row, app.new_connection.user.chars().count()),
+        Field::Host => (host_row, app.new_connection.host.chars().count()),
+        Field::AuthType => return,
+        Field::KeyPath => (key_row, app.new_connection.key_path.chars().count()),
+        Field::Password => (pass_row, app.new_connection.password.chars().count()),
+        Field::ActionTest | Field::ActionSave => return,
+    };
+    let Some(row) = row else {
+        return;
+    };
+    let indicator_len = 2u16;
+    let label_len = LABEL_WIDTH as u16 + 2;
+    let cursor_x = area.x + indicator_len + label_len + col as u16;
+    let cursor_y = area.y + row as u16;
+    frame.set_cursor_position((cursor_x, cursor_y));
+}
+
 
 
 fn auth_kind_label(kind: AuthKind) -> &'static str {
