@@ -73,7 +73,14 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
         };
         draw_open_tabs(frame, app, body[1], Some(logs_body), true, false);
     } else {
-        draw_open_tabs(frame, app, body[1], None, app.header_mode != crate::app::HeaderMode::Off, true);
+        draw_open_tabs(
+            frame,
+            app,
+            body[1],
+            None,
+            app.header_mode != crate::app::HeaderMode::Off,
+            true,
+        );
     }
 
     if app.mode == Mode::NewConnection {
@@ -231,10 +238,16 @@ fn draw_app_header(frame: &mut Frame<'_>, area: Rect) {
 
 fn draw_help_header(frame: &mut Frame<'_>, area: Rect) {
     let help = Paragraph::new(HELP_TEXT)
-        .block(Block::default().title(Line::from(Span::styled(
-            "Help",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        ))).borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(Line::from(Span::styled(
+                    "Help",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )))
+                .borders(Borders::ALL),
+        )
         .style(Style::default().fg(Color::Gray));
     frame.render_widget(help, area);
 }
@@ -271,47 +284,47 @@ fn draw_open_tabs(
     };
     if render_header {
         if let Some(help_area) = help_area {
-        match app.header_mode {
-            crate::app::HeaderMode::Help => {
-                let help = Paragraph::new(HELP_TEXT)
-                    .block(
-                        Block::default()
-                            .title(Line::from(Span::styled(
-                                "Help",
-                                Style::default()
-                                    .fg(Color::Magenta)
-                                    .add_modifier(Modifier::BOLD),
-                            )))
-                            .borders(Borders::ALL),
-                    )
-                    .style(Style::default().fg(Color::Gray));
-                frame.render_widget(help, help_area);
+            match app.header_mode {
+                crate::app::HeaderMode::Help => {
+                    let help = Paragraph::new(HELP_TEXT)
+                        .block(
+                            Block::default()
+                                .title(Line::from(Span::styled(
+                                    "Help",
+                                    Style::default()
+                                        .fg(Color::Magenta)
+                                        .add_modifier(Modifier::BOLD),
+                                )))
+                                .borders(Borders::ALL),
+                        )
+                        .style(Style::default().fg(Color::Gray));
+                    frame.render_widget(help, help_area);
+                }
+                crate::app::HeaderMode::Logs => {
+                    let log_lines = app
+                        .log_lines
+                        .iter()
+                        .rev()
+                        .take(help_area.height.saturating_sub(2) as usize)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    let logs = Paragraph::new(log_lines.join("\n"))
+                        .block(
+                            Block::default()
+                                .title(Line::from(Span::styled(
+                                    "Logs",
+                                    Style::default()
+                                        .fg(Color::Yellow)
+                                        .add_modifier(Modifier::BOLD),
+                                )))
+                                .borders(Borders::ALL),
+                        )
+                        .style(Style::default().fg(Color::Gray))
+                        .wrap(Wrap { trim: true });
+                    frame.render_widget(logs, help_area);
+                }
+                crate::app::HeaderMode::Off => {}
             }
-            crate::app::HeaderMode::Logs => {
-                let log_lines = app
-                    .log_lines
-                    .iter()
-                    .rev()
-                    .take(help_area.height.saturating_sub(2) as usize)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let logs = Paragraph::new(log_lines.join("\n"))
-                    .block(
-                        Block::default()
-                            .title(Line::from(Span::styled(
-                                "Logs",
-                                Style::default()
-                                    .fg(Color::Yellow)
-                                    .add_modifier(Modifier::BOLD),
-                            )))
-                            .borders(Borders::ALL),
-                    )
-                    .style(Style::default().fg(Color::Gray))
-                    .wrap(Wrap { trim: true });
-                frame.render_widget(logs, help_area);
-            }
-            crate::app::HeaderMode::Off => {}
-        }
         }
     }
 

@@ -1731,8 +1731,6 @@ fn resolve_picker_start(current: &str) -> Result<PathBuf> {
     std::env::current_dir().context("current dir")
 }
 
-
-
 fn prune_log_file(path: &Path, days: i64, max_entries: usize) {
     let Ok(content) = fs::read_to_string(path) else {
         return;
@@ -1743,7 +1741,9 @@ fn prune_log_file(path: &Path, days: i64, max_entries: usize) {
     for line in content.lines() {
         if let Some((ts, _)) = line.split_once(" | ") {
             let with_year = format!("{current_year}-{ts}");
-            if let Ok(parsed) = chrono::NaiveDateTime::parse_from_str(&with_year, "%Y-%m-%d %H:%M:%S") {
+            if let Ok(parsed) =
+                chrono::NaiveDateTime::parse_from_str(&with_year, "%Y-%m-%d %H:%M:%S")
+            {
                 if parsed >= cutoff {
                     kept.push(line.to_string());
                 }
