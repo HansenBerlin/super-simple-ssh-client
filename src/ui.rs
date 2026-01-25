@@ -225,13 +225,6 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect, logs_area: Optio
     if let Some(help_area) = help_area {
         match app.header_mode {
             crate::app::HeaderMode::Help => {
-                let help_width = help_area.width.saturating_mul(2) / 3;
-                let help_area = Rect {
-                    x: help_area.x,
-                    y: help_area.y,
-                    width: help_width,
-                    height: help_area.height,
-                };
                 let help = Paragraph::new(HELP_TEXT)
                     .block(Block::default().title(Line::from(Span::styled(
                         "Help",
