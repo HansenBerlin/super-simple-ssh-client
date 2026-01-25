@@ -227,16 +227,25 @@ pub(crate) enum TransferStep {
 
 #[derive(Debug, Clone)]
 pub(crate) struct TransferState {
+    pub(crate) direction: TransferDirection,
     pub(crate) step: TransferStep,
     pub(crate) source_path: Option<PathBuf>,
+    pub(crate) source_remote: Option<String>,
     pub(crate) source_is_dir: bool,
     pub(crate) target_dir: Option<String>,
+    pub(crate) target_local_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct KeyPickerState {
     pub(crate) keys: Vec<KeyCandidate>,
     pub(crate) selected: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TransferDirection {
+    Upload,
+    Download,
 }
 
 #[derive(Debug, Clone)]

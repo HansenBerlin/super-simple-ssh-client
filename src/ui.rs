@@ -10,10 +10,12 @@ use crate::app::App;
 use crate::model::{AuthConfig, AuthKind, Field, MasterField, Mode};
 
 const HELP_TEXT: &str =
-    "(t)erminal | (u)pload | (o)ptions | (h)eader toggle | (q)uit";
+    "(t)erminal | (u)pload | (d)ownload | (o)ptions | (h)eader toggle | (q)uit";
 const CONNECTION_COMMANDS: &str =
-    "(n)ew | (e)dit | (c)onnect | (d)isconnect | (x)delete";
+    "(n)ew | (e)dit | (c)onnect/(c)ancel | (d)ownload | (x)delete";
 const LABEL_WIDTH: usize = 9;
+const TRANSFER_PICKER_WIDTH: u16 = 60;
+const TRANSFER_PICKER_HEIGHT: u16 = 90;
 
 pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
     let layout = Layout::default()
@@ -529,10 +531,18 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(60, 90, frame.area());
+    let area = centered_rect(TRANSFER_PICKER_WIDTH, TRANSFER_PICKER_HEIGHT, frame.area());
     frame.render_widget(Clear, area);
-    let title = if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickSource) {
-        "Pick source file or folder"
+    let title = if let Some(transfer) = &app.transfer {
+        match (transfer.direction, transfer.step) {
+            (crate::model::TransferDirection::Upload, crate::model::TransferStep::PickSource) => {
+                "Pick source file or folder"
+            }
+            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickTarget) => {
+                "Pick target folder"
+            }
+            _ => "Pick key file",
+        }
     } else {
         "Pick key file"
     };
@@ -580,6 +590,8 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
 
     let footer_text = if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickSource) {
         "Enter to open, S to select folder, Backspace to up, Esc to cancel"
+    } else if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickTarget) {
+        "Enter to open, S to select folder, Backspace to up, Esc to cancel"
     } else {
         "Enter to open/select, Backspace to up, Esc to cancel"
     };
@@ -593,7 +605,7 @@ fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(60, 90, frame.area());
+    let area = centered_rect(TRANSFER_PICKER_WIDTH, TRANSFER_PICKER_HEIGHT, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -632,9 +644,19 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
     };
     let area = centered_rect(70, 50, frame.area());
     frame.render_widget(Clear, area);
+    let title = if let Some(transfer) = &app.transfer {
+        match (transfer.direction, transfer.step) {
+            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickSource) => {
+                "Pick remote source"
+            }
+            _ => "Pick remote target",
+        }
+    } else {
+        "Pick remote target"
+    };
     let block = Block::default()
         .title(Line::from(Span::styled(
-            "Pick remote target",
+            title,
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         )))
         .borders(Borders::ALL);
@@ -705,27 +727,55 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
 
     let inner = padded_rect(area, 1);
 
-    let source = transfer
-        .source_path
-        .as_ref()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "-".to_string());
-    let target_dir = transfer
-        .target_dir
-        .clone()
-        .unwrap_or_else(|| "-".to_string());
-    let target_name = transfer
-        .source_path
-        .as_ref()
-        .and_then(|p| p.file_name())
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| String::from("item"));
-    let target = if target_dir == "-" {
-        target_dir.clone()
-    } else if target_dir == "/" {
-        format!("/{target_name}")
-    } else {
-        format!("{target_dir}/{target_name}")
+    let (source, target) = match transfer.direction {
+        crate::model::TransferDirection::Upload => {
+            let source = transfer
+                .source_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "-".to_string());
+            let target_dir = transfer
+                .target_dir
+                .clone()
+                .unwrap_or_else(|| "-".to_string());
+            let target_name = transfer
+                .source_path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| String::from("item"));
+            let target = if target_dir == "-" {
+                target_dir.clone()
+            } else if target_dir == "/" {
+                format!("/{target_name}")
+            } else {
+                format!("{target_dir}/{target_name}")
+            };
+            (source, target)
+        }
+        crate::model::TransferDirection::Download => {
+            let source = transfer
+                .source_remote
+                .clone()
+                .unwrap_or_else(|| "-".to_string());
+            let target_dir = transfer
+                .target_local_dir
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "-".to_string());
+            let target_name = transfer
+                .source_remote
+                .as_ref()
+                .and_then(|p| std::path::Path::new(p).file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| String::from("item"));
+            let target = if target_dir == "-" {
+                target_dir.clone()
+            } else {
+                format!("{target_dir}/{target_name}")
+            };
+            (source, target)
+        }
     };
 
     let lines = vec![

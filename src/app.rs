@@ -17,8 +17,8 @@ use ratatui::backend::CrosstermBackend;
 use crate::model::{
     AppAction, AuthConfig, AuthKind, ConnectionConfig, Field, FileEntry, FilePickerState,
     HistoryEntry, HistoryState, KeyPickerState, MasterField, MasterPasswordState, Mode,
-    NewConnectionState, Notice, OpenConnection, RemoteEntry, RemotePickerState, TransferState,
-    TransferStep, TryResult,
+    NewConnectionState, Notice, OpenConnection, RemoteEntry, RemotePickerState, TransferDirection,
+    TransferState, TransferStep, TryResult,
 };
 use crate::ssh::{connect_ssh, expand_tilde, run_ssh_terminal};
 use crate::storage::{
@@ -29,6 +29,7 @@ use crate::storage::{
 enum NoticeAction {
     ConnectTerminal,
     ConnectUpload,
+    ConnectDownload,
 }
 
 pub(crate) struct App {
@@ -112,7 +113,10 @@ impl App {
                                     self.pending_action = Some(AppAction::OpenTerminal);
                                 }
                                 NoticeAction::ConnectUpload => {
-                                    self.start_transfer(config);
+                                    self.start_upload(config);
+                                }
+                                NoticeAction::ConnectDownload => {
+                                    self.start_download(config);
                                 }
                             }
                         }
@@ -149,6 +153,7 @@ impl App {
         match self.notice_action {
             Some(NoticeAction::ConnectTerminal) => Some("connect and open the terminal"),
             Some(NoticeAction::ConnectUpload) => Some("connect and select what to upload"),
+            Some(NoticeAction::ConnectDownload) => Some("connect and select what to download"),
             None => None,
         }
     }
@@ -214,13 +219,10 @@ impl App {
                 }
             }
             KeyCode::Char('c') => {
-                if let Some(config) = self.connections.get(self.selected_saved).cloned() {
-                    if let Err(err) = self.connect_and_open(config.clone()) {
-                        self.record_connect_error(&config, &err);
-                        self.status = format!("Connection failed: {err}");
-                    }
+                if self.selected_connected_connection().is_some() {
+                    self.disconnect_selected();
                 } else {
-                    self.status = "No saved connection selected".to_string();
+                    self.connect_selected();
                 }
             }
             KeyCode::Char('h') => {
@@ -240,7 +242,7 @@ impl App {
             }
             KeyCode::Char('u') => {
                 if let Some(conn) = self.selected_connected_connection() {
-                    self.start_transfer(conn);
+                    self.start_upload(conn);
                 } else {
                     self.notice = Some(Notice {
                         title: "Not connected".to_string(),
@@ -249,21 +251,21 @@ impl App {
                     self.notice_action = Some(NoticeAction::ConnectUpload);
                 }
             }
+            KeyCode::Char('d') => {
+                if let Some(conn) = self.selected_connected_connection() {
+                    self.start_download(conn);
+                } else {
+                    self.notice = Some(Notice {
+                        title: "Not connected".to_string(),
+                        message: "Please connect to the host machine first.".to_string(),
+                    });
+                    self.notice_action = Some(NoticeAction::ConnectDownload);
+                }
+            }
             KeyCode::Char('o') => {
                 self.mode = Mode::ChangeMasterPassword;
                 self.master_change = MasterPasswordState::default();
                 self.status = "Update master password".to_string();
-            }
-            KeyCode::Char('d') => {
-                if self.open_connections.is_empty() {
-                    self.status = "No open connections".to_string();
-                } else {
-                    self.open_connections.remove(self.selected_tab);
-                    if self.selected_tab > 0 {
-                        self.selected_tab -= 1;
-                    }
-                    self.status = "Disconnected".to_string();
-                }
             }
             KeyCode::Char('x') => {
                 if self.connections.is_empty() {
@@ -700,6 +702,26 @@ impl App {
         }
     }
 
+    fn disconnect_selected(&mut self) {
+        let Some(config) = self.connections.get(self.selected_saved) else {
+            self.status = "No saved connection selected".to_string();
+            return;
+        };
+        if let Some(index) = self
+            .open_connections
+            .iter()
+            .position(|conn| crate::model::same_identity(&conn.config, config))
+        {
+            self.open_connections.remove(index);
+            if self.selected_tab > 0 && self.selected_tab >= index {
+                self.selected_tab = self.selected_tab.saturating_sub(1);
+            }
+            self.status = "Disconnected".to_string();
+        } else {
+            self.status = "Selected connection is not connected".to_string();
+        }
+    }
+
     fn sort_connections_by_recent(&mut self, selected_key: Option<String>) {
         self.connections.sort_by(|left, right| {
             let left_ts = left.history.iter().map(|h| h.ts).max().unwrap_or(0);
@@ -743,6 +765,10 @@ impl App {
 
     fn handle_file_picker_key(&mut self, key: KeyEvent) -> Result<bool> {
         if let Some(picker) = &mut self.file_picker {
+            let transfer_mode = self
+                .transfer
+                .as_ref()
+                .map(|t| (t.direction, t.step));
             match key.code {
                 KeyCode::Esc => {
                     self.file_picker = None;
@@ -770,35 +796,40 @@ impl App {
                 KeyCode::Enter => {
                     if let Some(entry) = picker.entries.get(picker.selected).cloned() {
                         if entry.is_dir {
-                            if self.transfer.as_ref().is_some_and(|t| t.step == TransferStep::PickSource) {
-                                picker.cwd = entry.path;
-                                picker.entries = read_dir_entries(&picker.cwd)?;
-                                picker.selected = 0;
-                            } else {
-                                picker.cwd = entry.path;
-                                picker.entries = read_dir_entries(&picker.cwd)?;
-                                picker.selected = 0;
-                            }
+                            picker.cwd = entry.path;
+                            picker.entries = read_dir_entries(&picker.cwd)?;
+                            picker.selected = 0;
                         } else {
-                            if self.transfer.as_ref().is_some_and(|t| t.step == TransferStep::PickSource) {
-                                self.select_source(entry.path, false);
-                                self.file_picker = None;
-                                self.open_remote_picker()?;
-                            } else {
-                                self.new_connection.key_path =
-                                    entry.path.to_string_lossy().into_owned();
-                                self.file_picker = None;
+                            match transfer_mode {
+                                Some((TransferDirection::Upload, TransferStep::PickSource)) => {
+                                    self.select_source(entry.path, false);
+                                    self.file_picker = None;
+                                    self.open_remote_picker()?;
+                                }
+                                Some((TransferDirection::Download, TransferStep::PickTarget)) => {}
+                                _ => {
+                                    self.new_connection.key_path =
+                                        entry.path.to_string_lossy().into_owned();
+                                    self.file_picker = None;
+                                }
                             }
                         }
                     }
                 }
                 KeyCode::Char('s') => {
-                    if self.transfer.as_ref().is_some_and(|t| t.step == TransferStep::PickSource) {
-                        if let Some(entry) = picker.entries.get(picker.selected).cloned() {
-                            if entry.is_dir {
-                                self.select_source(entry.path, true);
-                                self.file_picker = None;
-                                self.open_remote_picker()?;
+                    if let Some(entry) = picker.entries.get(picker.selected).cloned() {
+                        if entry.is_dir {
+                            match transfer_mode {
+                                Some((TransferDirection::Upload, TransferStep::PickSource)) => {
+                                    self.select_source(entry.path, true);
+                                    self.file_picker = None;
+                                    self.open_remote_picker()?;
+                                }
+                                Some((TransferDirection::Download, TransferStep::PickTarget)) => {
+                                    self.select_target_local_dir(entry.path);
+                                    self.file_picker = None;
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -813,6 +844,10 @@ impl App {
         let Some(mut picker) = self.remote_picker.take() else {
             return Ok(false);
         };
+        let transfer_mode = self
+            .transfer
+            .as_ref()
+            .map(|t| (t.direction, t.step));
         match key.code {
             KeyCode::Esc => {
                 self.remote_picker = None;
@@ -855,18 +890,37 @@ impl App {
                         picker.loading = true;
                         picker.error = None;
                         self.start_remote_fetch(new_cwd)?;
+                    } else if matches!(
+                        transfer_mode,
+                        Some((TransferDirection::Download, TransferStep::PickSource))
+                    ) {
+                        self.select_remote_source(entry.path, false);
+                        self.remote_picker = None;
+                        self.open_local_target_picker()?;
+                        return Ok(false);
                     }
                 }
             }
             KeyCode::Char('s') => {
                 if let Some(entry) = picker.entries.get(picker.selected).cloned() {
                     if entry.is_dir {
-                        self.select_target_dir(entry.path);
-                        self.transfer = self.transfer.take().map(|mut t| {
-                            t.step = TransferStep::Confirm;
-                            t
-                        });
-                        return Ok(false);
+                        match transfer_mode {
+                            Some((TransferDirection::Upload, TransferStep::PickTarget)) => {
+                                self.select_target_dir(entry.path);
+                                self.transfer = self.transfer.take().map(|mut t| {
+                                    t.step = TransferStep::Confirm;
+                                    t
+                                });
+                                return Ok(false);
+                            }
+                            Some((TransferDirection::Download, TransferStep::PickSource)) => {
+                                self.select_remote_source(entry.path, true);
+                                self.remote_picker = None;
+                                self.open_local_target_picker()?;
+                                return Ok(false);
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }
@@ -1066,10 +1120,13 @@ impl App {
 
     fn start_transfer(&mut self, conn: ConnectionConfig) {
         self.transfer = Some(TransferState {
+            direction: TransferDirection::Upload,
             step: TransferStep::PickSource,
             source_path: None,
+            source_remote: None,
             source_is_dir: false,
             target_dir: None,
+            target_local_dir: None,
         });
         if let Ok(start_dir) = resolve_picker_start("") {
             if let Ok(entries) = read_dir_entries(&start_dir) {
@@ -1083,9 +1140,37 @@ impl App {
         self.status = format!("Select source for {}", conn.label());
     }
 
+    fn start_upload(&mut self, conn: ConnectionConfig) {
+        self.start_transfer(conn);
+    }
+
+    fn start_download(&mut self, conn: ConnectionConfig) {
+        self.transfer = Some(TransferState {
+            direction: TransferDirection::Download,
+            step: TransferStep::PickSource,
+            source_path: None,
+            source_remote: None,
+            source_is_dir: false,
+            target_dir: None,
+            target_local_dir: None,
+        });
+        if let Err(err) = self.open_remote_picker() {
+            self.status = format!("Failed to open remote picker: {err}");
+        }
+        self.status = format!("Select remote source for {}", conn.label());
+    }
+
     fn select_source(&mut self, path: PathBuf, is_dir: bool) {
         if let Some(transfer) = &mut self.transfer {
             transfer.source_path = Some(path);
+            transfer.source_is_dir = is_dir;
+            transfer.step = TransferStep::PickTarget;
+        }
+    }
+
+    fn select_remote_source(&mut self, path: String, is_dir: bool) {
+        if let Some(transfer) = &mut self.transfer {
+            transfer.source_remote = Some(path);
             transfer.source_is_dir = is_dir;
             transfer.step = TransferStep::PickTarget;
         }
@@ -1115,6 +1200,17 @@ impl App {
         Ok(())
     }
 
+    fn open_local_target_picker(&mut self) -> Result<()> {
+        let start_dir = resolve_picker_start("")?;
+        let entries = read_dir_entries(&start_dir)?;
+        self.file_picker = Some(FilePickerState {
+            cwd: start_dir,
+            entries,
+            selected: 0,
+        });
+        Ok(())
+    }
+
     fn select_target_dir(&mut self, path: String) {
         if let Some(transfer) = &mut self.transfer {
             transfer.target_dir = Some(path);
@@ -1122,15 +1218,16 @@ impl App {
         }
     }
 
+    fn select_target_local_dir(&mut self, path: PathBuf) {
+        if let Some(transfer) = &mut self.transfer {
+            transfer.target_local_dir = Some(path);
+            transfer.step = TransferStep::Confirm;
+        }
+    }
+
     fn execute_transfer(&mut self) -> Result<()> {
         let Some(transfer) = self.transfer.take() else {
             return Ok(());
-        };
-        let Some(source) = transfer.source_path else {
-            anyhow::bail!("Missing source");
-        };
-        let Some(target_dir) = transfer.target_dir else {
-            anyhow::bail!("Missing target");
         };
         let Some(conn) = self.selected_connected_connection() else {
             anyhow::bail!("Selected connection is not connected");
@@ -1140,7 +1237,36 @@ impl App {
             .iter()
             .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
             .context("selected connection is not connected")?;
-        crate::ssh::transfer_path(&open_conn.session, &source, &target_dir, transfer.source_is_dir)?;
+        match transfer.direction {
+            TransferDirection::Upload => {
+                let Some(source) = transfer.source_path else {
+                    anyhow::bail!("Missing source");
+                };
+                let Some(target_dir) = transfer.target_dir else {
+                    anyhow::bail!("Missing target");
+                };
+                crate::ssh::transfer_path(
+                    &open_conn.session,
+                    &source,
+                    &target_dir,
+                    transfer.source_is_dir,
+                )?;
+            }
+            TransferDirection::Download => {
+                let Some(source) = transfer.source_remote else {
+                    anyhow::bail!("Missing source");
+                };
+                let Some(target_dir) = transfer.target_local_dir else {
+                    anyhow::bail!("Missing target");
+                };
+                crate::ssh::download_path(
+                    &open_conn.session,
+                    &source,
+                    &target_dir,
+                    transfer.source_is_dir,
+                )?;
+            }
+        }
         self.status = "Transfer completed".to_string();
         Ok(())
     }
