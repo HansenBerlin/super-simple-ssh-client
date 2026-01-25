@@ -10,7 +10,8 @@ use crate::app::App;
 use crate::model::{AuthConfig, AuthKind, Field, MasterField, Mode};
 
 const HELP_TEXT: &str =
-    "n = new | e = edit | c = connect | d = disconnect | t = terminal | f = transfer | m = master pw | x = delete | h = toggle header | q = quit";
+    "t = terminal | f = transfer | m = master pw | h = toggle header | q = quit";
+const CONNECTION_COMMANDS: &str = "n new | e edit | c connect | d disconnect | x delete";
 const LABEL_WIDTH: usize = 9;
 
 pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
@@ -119,17 +120,27 @@ fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .collect()
     };
 
-    let list = List::new(items)
-        .block(Block::default().title(Line::from(Span::styled(
+    let block = Block::default()
+        .title(Line::from(Span::styled(
             "Available connections",
             header_style,
-        ))).borders(Borders::ALL))
+        )))
+        .borders(Borders::ALL);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol(">");
     let list = list.highlight_symbol(Span::styled(
         ">",
         Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
     ));
+    let list_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: inner.height.saturating_sub(1),
+    };
 
     let mut state = ratatui::widgets::ListState::default();
     if app.connections.is_empty() {
@@ -138,7 +149,18 @@ fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         let rel = app.selected_saved.saturating_sub(start);
         state.select(Some(rel));
     }
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(list, list_area, &mut state);
+
+    let commands = Paragraph::new(CONNECTION_COMMANDS)
+        .style(Style::default().fg(Color::Gray))
+        .alignment(Alignment::Center);
+    let commands_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    frame.render_widget(commands, commands_area);
 }
 
 fn draw_app_header(frame: &mut Frame<'_>, area: Rect) {
@@ -228,6 +250,7 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
             ]));
         }
 
+        lines.push(Line::from(""));
         let history_len = conn.history.len();
         let start_end = app.history_range(
             history_len,
@@ -235,10 +258,12 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
         );
         let start = start_end.0;
         let end = start_end.1;
-
-        lines.push(Line::from(""));
+        let page_size = (end.saturating_sub(start)).max(1);
+        let max_page = history_len.saturating_sub(1) / page_size;
+        let page = app.history_page.min(max_page) + 1;
+        let total_pages = max_page + 1;
         lines.push(Line::from(Span::styled(
-            "Past connections:",
+            format!("Past connections ({page}/{total_pages}):"),
             Style::default().add_modifier(Modifier::BOLD),
         )));
         if conn.history.is_empty() {

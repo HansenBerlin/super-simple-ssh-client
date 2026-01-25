@@ -992,7 +992,11 @@ impl App {
     }
 
     fn open_remote_picker(&mut self) -> Result<()> {
-        let cwd = "/".to_string();
+        let cwd = if let Some(conn) = self.selected_connected_connection() {
+            format!("/home/{}", conn.user)
+        } else {
+            "/".to_string()
+        };
         self.remote_picker = Some(RemotePickerState {
             cwd: cwd.clone(),
             entries: vec![],
@@ -1000,7 +1004,14 @@ impl App {
             loading: true,
             error: None,
         });
-        self.start_remote_fetch(cwd)?;
+        if let Err(_err) = self.start_remote_fetch(cwd.clone()) {
+            if let Err(err) = self.start_remote_fetch("/".to_string()) {
+                return Err(err);
+            }
+            if let Some(picker) = &mut self.remote_picker {
+                picker.cwd = "/".to_string();
+            }
+        }
         Ok(())
     }
 
