@@ -28,8 +28,13 @@ impl ConnectionConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) enum AuthConfig {
-    Password { password: String },
-    PrivateKey { path: String, password: Option<String> },
+    Password {
+        password: String,
+    },
+    PrivateKey {
+        path: String,
+        password: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,8 +80,13 @@ pub(crate) struct StoredConnection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum StoredAuthConfig {
-    Password { password: EncryptedBlob },
-    PrivateKey { path: String, password: Option<EncryptedBlob> },
+    Password {
+        password: EncryptedBlob,
+    },
+    PrivateKey {
+        path: String,
+        password: Option<EncryptedBlob>,
+    },
 }
 
 pub(crate) fn same_identity(left: &ConnectionConfig, right: &ConnectionConfig) -> bool {
@@ -86,8 +96,12 @@ pub(crate) fn same_identity(left: &ConnectionConfig, right: &ConnectionConfig) -
     match (&left.auth, &right.auth) {
         (AuthConfig::Password { .. }, AuthConfig::Password { .. }) => true,
         (
-            AuthConfig::PrivateKey { path: left_path, .. },
-            AuthConfig::PrivateKey { path: right_path, .. },
+            AuthConfig::PrivateKey {
+                path: left_path, ..
+            },
+            AuthConfig::PrivateKey {
+                path: right_path, ..
+            },
         ) => left_path == right_path,
         _ => false,
     }
@@ -288,9 +302,8 @@ pub(crate) fn now_epoch() -> u64 {
 }
 
 pub(crate) fn format_history_entry(entry: &HistoryEntry) -> String {
-    let dt = chrono::DateTime::<Local>::from(
-        SystemTime::UNIX_EPOCH + Duration::from_secs(entry.ts),
-    );
+    let dt =
+        chrono::DateTime::<Local>::from(SystemTime::UNIX_EPOCH + Duration::from_secs(entry.ts));
     let state = match entry.state {
         HistoryState::Success => "success",
         HistoryState::Failure => "failed",

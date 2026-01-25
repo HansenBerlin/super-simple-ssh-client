@@ -1,20 +1,18 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
-use base64::engine::general_purpose::STANDARD as Base64;
+use anyhow::{Context, Result};
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as Base64;
 use pbkdf2::pbkdf2_hmac;
 use rand_core::OsRng;
 use rand_core::TryRngCore;
 use rpassword::prompt_password;
 use sha2::Sha256;
 
-use crate::model::{
-    ConnectionConfig, EncryptedBlob, MasterConfig, StoreFile, StoredConnection,
-};
+use crate::model::{ConnectionConfig, EncryptedBlob, MasterConfig, StoreFile, StoredConnection};
 
 pub(crate) fn config_path() -> Result<PathBuf> {
     if let Some(mut dir) = dirs::config_dir() {
@@ -93,7 +91,8 @@ pub(crate) fn prompt_existing_master(master: &MasterConfig) -> Result<Vec<u8>> {
 pub(crate) fn setup_master() -> Result<(MasterConfig, Vec<u8>)> {
     loop {
         let password = prompt_password("Set master password: ").context("read master password")?;
-        let confirm = prompt_password("Confirm master password: ").context("read confirm password")?;
+        let confirm =
+            prompt_password("Confirm master password: ").context("read confirm password")?;
         if password != confirm {
             eprintln!("Passwords do not match.");
             continue;
@@ -158,9 +157,11 @@ pub(crate) fn decrypt_string(blob: &EncryptedBlob, key: &[u8]) -> Result<String>
 
 pub(crate) fn encrypt_connection(conn: &ConnectionConfig, key: &[u8]) -> Result<StoredConnection> {
     let auth = match &conn.auth {
-        crate::model::AuthConfig::Password { password } => crate::model::StoredAuthConfig::Password {
-            password: encrypt_string(password, key)?,
-        },
+        crate::model::AuthConfig::Password { password } => {
+            crate::model::StoredAuthConfig::Password {
+                password: encrypt_string(password, key)?,
+            }
+        }
         crate::model::AuthConfig::PrivateKey { path, password } => {
             crate::model::StoredAuthConfig::PrivateKey {
                 path: path.clone(),
@@ -182,9 +183,11 @@ pub(crate) fn encrypt_connection(conn: &ConnectionConfig, key: &[u8]) -> Result<
 
 pub(crate) fn decrypt_connection(conn: StoredConnection, key: &[u8]) -> Result<ConnectionConfig> {
     let auth = match conn.auth {
-        crate::model::StoredAuthConfig::Password { password } => crate::model::AuthConfig::Password {
-            password: decrypt_string(&password, key)?,
-        },
+        crate::model::StoredAuthConfig::Password { password } => {
+            crate::model::AuthConfig::Password {
+                password: decrypt_string(&password, key)?,
+            }
+        }
         crate::model::StoredAuthConfig::PrivateKey { path, password } => {
             crate::model::AuthConfig::PrivateKey {
                 path,

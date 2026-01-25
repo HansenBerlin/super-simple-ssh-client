@@ -1,18 +1,16 @@
 use std::collections::HashSet;
 
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap};
-use ratatui::Frame;
 
 use crate::app::App;
 use crate::model::{AuthConfig, AuthKind, Field, MasterField, Mode};
 
-const HELP_TEXT: &str =
-    "(t)erminal | (u)pload | (d)ownload | (o)ptions | (h)eader mode | (q)uit";
-const CONNECTION_COMMANDS: &str =
-    "(n)ew | (e)dit | (c)onnect/(c)ancel | (d)ownload | (x)delete";
+const HELP_TEXT: &str = "(t)erminal | (u)pload | (d)ownload | (o)ptions | (h)eader mode | (q)uit";
+const CONNECTION_COMMANDS: &str = "(n)ew | (e)dit | (c)onnect/(c)ancel | (d)ownload | (x)delete";
 const LABEL_WIDTH: usize = 9;
 const TRANSFER_PICKER_WIDTH: u16 = 60;
 const TRANSFER_PICKER_HEIGHT: u16 = 90;
@@ -61,9 +59,22 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
         draw_saved_list(frame, app, left[0]);
     }
     if app.header_mode == crate::app::HeaderMode::Help {
-        draw_open_tabs(frame, app, body[1], Some(body[2]));
+        let help_header = Rect {
+            x: body[1].x,
+            y: body[1].y,
+            width: body[1].width.saturating_add(body[2].width),
+            height: 3,
+        };
+        draw_help_header(frame, help_header);
+        let logs_body = Rect {
+            x: body[2].x,
+            y: body[2].y + 3,
+            width: body[2].width,
+            height: body[2].height.saturating_sub(3),
+        };
+        draw_open_tabs(frame, app, body[1], Some(logs_body), true, false);
     } else {
-        draw_open_tabs(frame, app, body[1], None);
+        draw_open_tabs(frame, app, body[1], None, app.header_mode != crate::app::HeaderMode::Off, true);
     }
 
     if app.mode == Mode::NewConnection {
@@ -105,7 +116,9 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let header_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let header_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
     let connected: HashSet<String> = app
         .open_connections
         .iter()
@@ -163,7 +176,9 @@ fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .highlight_symbol(">");
     let list = list.highlight_symbol(Span::styled(
         ">",
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
     ));
     let list_area = Rect {
         x: inner.x,
@@ -195,21 +210,44 @@ fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
 fn draw_app_header(frame: &mut Frame<'_>, area: Rect) {
     let title = Paragraph::new("SUPER SIMPLE SSH 0.1.0")
-        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
         .block(Block::default().borders(Borders::ALL))
         .alignment(Alignment::Center);
     frame.render_widget(title, area);
 }
 
-fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect, logs_area: Option<Rect>) {
-    let header_style = Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD);
+fn draw_help_header(frame: &mut Frame<'_>, area: Rect) {
+    let help = Paragraph::new(HELP_TEXT)
+        .block(Block::default().title(Line::from(Span::styled(
+            "Help",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ))).borders(Borders::ALL))
+        .style(Style::default().fg(Color::Gray));
+    frame.render_widget(help, area);
+}
+
+fn draw_open_tabs(
+    frame: &mut Frame<'_>,
+    app: &App,
+    area: Rect,
+    logs_area: Option<Rect>,
+    has_header: bool,
+    render_header: bool,
+) {
+    let header_style = Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
     let tabs_area = Rect {
         x: area.x,
         y: area.y,
         width: area.width,
         height: 3,
     };
-    let (body_area, help_area) = if app.header_mode != crate::app::HeaderMode::Off {
+    let (body_area, help_area) = if has_header {
         (
             Rect {
                 x: area.x,
@@ -222,14 +260,21 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect, logs_area: Optio
     } else {
         (area, None)
     };
-    if let Some(help_area) = help_area {
+    if render_header {
+        if let Some(help_area) = help_area {
         match app.header_mode {
             crate::app::HeaderMode::Help => {
                 let help = Paragraph::new(HELP_TEXT)
-                    .block(Block::default().title(Line::from(Span::styled(
-                        "Help",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    ))).borders(Borders::ALL))
+                    .block(
+                        Block::default()
+                            .title(Line::from(Span::styled(
+                                "Help",
+                                Style::default()
+                                    .fg(Color::Yellow)
+                                    .add_modifier(Modifier::BOLD),
+                            )))
+                            .borders(Borders::ALL),
+                    )
                     .style(Style::default().fg(Color::Gray));
                 frame.render_widget(help, help_area);
             }
@@ -242,15 +287,22 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect, logs_area: Optio
                     .cloned()
                     .collect::<Vec<_>>();
                 let logs = Paragraph::new(log_lines.join("\n"))
-                    .block(Block::default().title(Line::from(Span::styled(
-                        "Logs",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    ))).borders(Borders::ALL))
+                    .block(
+                        Block::default()
+                            .title(Line::from(Span::styled(
+                                "Logs",
+                                Style::default()
+                                    .fg(Color::Yellow)
+                                    .add_modifier(Modifier::BOLD),
+                            )))
+                            .borders(Borders::ALL),
+                    )
                     .style(Style::default().fg(Color::Gray))
                     .wrap(Wrap { trim: true });
                 frame.render_widget(logs, help_area);
             }
             crate::app::HeaderMode::Off => {}
+        }
         }
     }
 
@@ -308,10 +360,7 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect, logs_area: Optio
 
         lines.push(Line::from(""));
         let history_len = conn.history.len();
-        let start_end = app.history_range(
-            history_len,
-            app.last_error.contains_key(&key),
-        );
+        let start_end = app.history_range(history_len, app.last_error.contains_key(&key));
         let start = start_end.0;
         let end = start_end.1;
         let page_size = (end.saturating_sub(start)).max(1);
@@ -337,10 +386,7 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect, logs_area: Optio
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(Line::from(Span::styled(
-                        "Connection details",
-                        header_style,
-                    ))),
+                    .title(Line::from(Span::styled("Connection details", header_style))),
             )
             .wrap(Wrap { trim: true })
     } else {
@@ -348,10 +394,7 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect, logs_area: Optio
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(Line::from(Span::styled(
-                        "Connection details",
-                        header_style,
-                    ))),
+                    .title(Line::from(Span::styled("Connection details", header_style))),
             )
             .alignment(Alignment::Center)
     };
@@ -365,10 +408,16 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect, logs_area: Optio
             .cloned()
             .collect::<Vec<_>>();
         let logs = Paragraph::new(log_lines.join("\n"))
-            .block(Block::default().title(Line::from(Span::styled(
-                "Logs",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ))).borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(Line::from(Span::styled(
+                        "Logs",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )))
+                    .borders(Borders::ALL),
+            )
             .style(Style::default().fg(Color::Gray))
             .wrap(Wrap { trim: true });
         frame.render_widget(logs, logs_area);
@@ -399,8 +448,7 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         .max(30);
     let pad = 1u16;
     let content_width = area_width.saturating_sub(2 + pad * 2);
-    let value_width = content_width
-        .saturating_sub((2 + LABEL_WIDTH as u16 + 2) as u16) as usize;
+    let value_width = content_width.saturating_sub((2 + LABEL_WIDTH as u16 + 2) as u16) as usize;
     let max_height = frame.area().height.saturating_mul(70) / 100;
 
     let title = if app.edit_index.is_some() {
@@ -526,11 +574,13 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
     let inner = draw_popup_frame(frame, area, title, Style::default().fg(Color::Yellow));
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(footer_lines.len() as u16),
-        ]
-        .as_ref())
+        .constraints(
+            [
+                Constraint::Min(1),
+                Constraint::Length(footer_lines.len() as u16),
+            ]
+            .as_ref(),
+        )
         .split(inner);
 
     let active_row = match app.new_connection.active_field {
@@ -567,16 +617,7 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
     let paragraph = Paragraph::new(visible_lines).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, layout[0]);
     render_input_cursor(
-        frame,
-        app,
-        layout[0],
-        scroll,
-        name_row,
-        user_row,
-        host_row,
-        auth_row,
-        key_row,
-        pass_row,
+        frame, app, layout[0], scroll, name_row, user_row, host_row, auth_row, key_row, pass_row,
     );
 
     let footer = Paragraph::new(footer_lines).style(Style::default().fg(Color::Gray));
@@ -596,11 +637,13 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
                 Style::default().fg(Color::White),
                 "Enter to open, S to select folder, Backspace to up, Esc to cancel",
             ),
-            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickTarget) => (
-                "Pick target folder",
-                Style::default().fg(Color::White),
-                "Enter to open, S to select folder, B to go back to source, Backspace to up, Esc to cancel",
-            ),
+            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickTarget) => {
+                (
+                    "Pick target folder",
+                    Style::default().fg(Color::White),
+                    "Enter to open, S to select folder, B to go back to source, Backspace to up, Esc to cancel",
+                )
+            }
             _ => (
                 "Pick key file",
                 Style::default(),
@@ -618,7 +661,14 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)].as_ref())
+        .constraints(
+            [
+                Constraint::Length(1),
+                Constraint::Min(3),
+                Constraint::Length(1),
+            ]
+            .as_ref(),
+        )
         .split(inner);
 
     let header = Paragraph::new(format!("Dir: {}", picker.cwd.display()))
@@ -648,8 +698,7 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
         &mut list_state(picker.selected, picker.entries.len()),
     );
 
-    let footer = Paragraph::new(footer_text)
-        .style(Style::default().fg(Color::Gray));
+    let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::Gray));
     frame.render_widget(footer, layout[2]);
 }
 
@@ -670,7 +719,11 @@ fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
         .keys
         .iter()
         .map(|entry| {
-            let suffix = if entry.password.is_some() { " (pw)" } else { "" };
+            let suffix = if entry.password.is_some() {
+                " (pw)"
+            } else {
+                ""
+            };
             ListItem::new(format!("{}{}", entry.path, suffix))
         })
         .collect();
@@ -694,11 +747,13 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
     let area = centered_rect(TRANSFER_PICKER_WIDTH, TRANSFER_PICKER_HEIGHT, frame.area());
     let (title, border_style, footer_text) = if let Some(transfer) = &app.transfer {
         match (transfer.direction, transfer.step) {
-            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickSource) => (
-                "Pick remote source",
-                Style::default().fg(Color::Green),
-                "Enter to open, S to select folder, Backspace to up, Esc to cancel",
-            ),
+            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickSource) => {
+                (
+                    "Pick remote source",
+                    Style::default().fg(Color::Green),
+                    "Enter to open, S to select folder, Backspace to up, Esc to cancel",
+                )
+            }
             (crate::model::TransferDirection::Upload, crate::model::TransferStep::PickTarget) => (
                 "Pick where to save the file or folder on the REMOTE host",
                 Style::default().fg(Color::Green),
@@ -721,11 +776,18 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)].as_ref())
+        .constraints(
+            [
+                Constraint::Length(1),
+                Constraint::Min(3),
+                Constraint::Length(1),
+            ]
+            .as_ref(),
+        )
         .split(inner);
 
-    let header = Paragraph::new(format!("Dir: {}", picker.cwd))
-        .style(Style::default().fg(Color::Gray));
+    let header =
+        Paragraph::new(format!("Dir: {}", picker.cwd)).style(Style::default().fg(Color::Gray));
     frame.render_widget(header, layout[0]);
 
     let items: Vec<ListItem> = picker
@@ -759,8 +821,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         );
     }
 
-    let footer = Paragraph::new(footer_text)
-        .style(Style::default().fg(Color::Gray));
+    let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::Gray));
     frame.render_widget(footer, layout[2]);
 }
 
@@ -843,7 +904,14 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
     let layout = if transferring {
         Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(1), Constraint::Length(1)].as_ref())
+            .constraints(
+                [
+                    Constraint::Min(3),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                ]
+                .as_ref(),
+            )
             .split(inner)
     } else {
         Layout::default()
@@ -857,7 +925,11 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
     if transferring {
         let total = transfer.size_bytes.unwrap_or(0);
         let current = transfer.progress_bytes.min(total);
-        let ratio = if total == 0 { 0.0 } else { current as f64 / total as f64 };
+        let ratio = if total == 0 {
+            0.0
+        } else {
+            current as f64 / total as f64
+        };
         let label = if total == 0 {
             "0 B".to_string()
         } else {
@@ -950,14 +1022,7 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, layout[0]);
-    render_master_cursor(
-        frame,
-        app,
-        layout[0],
-        current_row,
-        new_row,
-        confirm_row,
-    );
+    render_master_cursor(frame, app, layout[0], current_row, new_row, confirm_row);
 
     let footer = Paragraph::new(Line::from(vec![
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
@@ -1015,7 +1080,11 @@ fn draw_try_result_modal(frame: &mut Frame<'_>, app: &App) {
     };
     let height = modal_height(2, 1);
     let area = centered_rect_by_height(50, height, frame.area());
-    let title = if result.success { "Try success" } else { "Try failed" };
+    let title = if result.success {
+        "Try success"
+    } else {
+        "Try failed"
+    };
     let inner = draw_popup_frame(frame, area, title, Style::default().fg(Color::Yellow));
 
     let layout = Layout::default()
@@ -1041,7 +1110,11 @@ fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
         None => return,
     };
     let message_lines = notice.message.lines().count().max(1);
-    let footer_lines = if app.notice_action_label().is_some() { 1 } else { 1 };
+    let footer_lines = if app.notice_action_label().is_some() {
+        1
+    } else {
+        1
+    };
     let height = modal_height(message_lines + footer_lines + 2, 0);
     let area = centered_rect_by_height(50, height, frame.area());
     let inner = draw_popup_frame(
@@ -1098,7 +1171,9 @@ fn field_line(
     };
     let display = truncate_text(&display, max_value_width);
     let indicator = if active { "> " } else { "  " };
-    let indicator_style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+    let indicator_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
     let spans = vec![
         Span::styled(indicator, indicator_style),
         Span::styled(
@@ -1128,10 +1203,15 @@ fn truncate_text(value: &str, max_width: usize) -> String {
 
 fn action_line(label: &str, active: bool) -> Line<'static> {
     let indicator = if active { "> " } else { "  " };
-    let indicator_style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+    let indicator_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
     let spans = vec![
         Span::styled(indicator, indicator_style),
-        Span::styled(format!("{label}"), Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{label}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
     ];
     Line::from(spans)
 }
@@ -1216,8 +1296,6 @@ fn render_master_cursor(
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
-
-
 fn auth_kind_label(kind: AuthKind) -> &'static str {
     match kind {
         AuthKind::PasswordOnly => "Password only",
@@ -1263,7 +1341,12 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
     let height = height.max(5).min(area.height);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
-    Rect { x, y, width, height }
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
 }
 
 fn padded_rect(area: Rect, pad: u16) -> Rect {

@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::path::Path;
 use std::net::{TcpStream, ToSocketAddrs};
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -17,10 +17,7 @@ pub(crate) fn connect_ssh(config: &ConnectionConfig) -> Result<Session> {
     let address = format!("{}:22", config.host);
     let mut last_err = None;
     let mut tcp = None;
-    for addr in address
-        .to_socket_addrs()
-        .context("resolve address")?
-    {
+    for addr in address.to_socket_addrs().context("resolve address")? {
         match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
             Ok(stream) => {
                 tcp = Some(stream);
@@ -70,17 +67,17 @@ pub(crate) fn run_ssh_terminal(session: &Session) -> Result<()> {
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
     let mut channel = session.channel_session().context("open channel")?;
     channel
-        .request_pty("xterm", None, Some((u32::from(cols), u32::from(rows), 0, 0)))
+        .request_pty(
+            "xterm",
+            None,
+            Some((u32::from(cols), u32::from(rows), 0, 0)),
+        )
         .context("request pty")?;
     channel.shell().context("start shell")?;
     session.set_blocking(false);
 
     let mut stdout = io::stdout();
-    writeln!(
-        stdout,
-        "Connected. Press Ctrl+g to return to the client."
-    )
-    .ok();
+    writeln!(stdout, "Connected. Press Ctrl+g to return to the client.").ok();
     stdout.flush().ok();
 
     let mut buffer = [0u8; 4096];
@@ -251,7 +248,9 @@ fn download_dir(sftp: &ssh2::Sftp, remote_dir: &str, local_dir: &Path) -> Result
 }
 
 fn download_file(sftp: &ssh2::Sftp, remote_path: &str, local_path: &Path) -> Result<()> {
-    let mut remote = sftp.open(Path::new(remote_path)).context("open remote file")?;
+    let mut remote = sftp
+        .open(Path::new(remote_path))
+        .context("open remote file")?;
     let mut local = File::create(local_path).context("create local file")?;
     io::copy(&mut remote, &mut local).context("copy file")?;
     Ok(())
@@ -377,7 +376,9 @@ fn upload_file_with_progress(
         if read == 0 {
             break;
         }
-        remote.write_all(&buffer[..read]).context("write remote file")?;
+        remote
+            .write_all(&buffer[..read])
+            .context("write remote file")?;
         let _ = tx.send(crate::model::TransferUpdate::Bytes(read as u64));
     }
     Ok(())
@@ -426,7 +427,9 @@ fn download_file_with_progress(
     tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
     cancel_rx: &std::sync::mpsc::Receiver<()>,
 ) -> Result<()> {
-    let mut remote = sftp.open(Path::new(remote_path)).context("open remote file")?;
+    let mut remote = sftp
+        .open(Path::new(remote_path))
+        .context("open remote file")?;
     let mut local = File::create(local_path).context("create local file")?;
     let mut buffer = [0u8; 8192];
     loop {
@@ -435,7 +438,9 @@ fn download_file_with_progress(
         if read == 0 {
             break;
         }
-        local.write_all(&buffer[..read]).context("write local file")?;
+        local
+            .write_all(&buffer[..read])
+            .context("write local file")?;
         let _ = tx.send(crate::model::TransferUpdate::Bytes(read as u64));
     }
     Ok(())

@@ -5,12 +5,14 @@ use std::sync::mpsc;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
-use base64::engine::general_purpose::STANDARD as Base64;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as Base64;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
@@ -418,7 +420,9 @@ impl App {
                     let next = match (self.new_connection.auth_kind, key.code) {
                         (AuthKind::PasswordOnly, KeyCode::Right) => AuthKind::PrivateKey,
                         (AuthKind::PrivateKey, KeyCode::Right) => AuthKind::PrivateKeyWithPassword,
-                        (AuthKind::PrivateKeyWithPassword, KeyCode::Right) => AuthKind::PasswordOnly,
+                        (AuthKind::PrivateKeyWithPassword, KeyCode::Right) => {
+                            AuthKind::PasswordOnly
+                        }
                         (AuthKind::PasswordOnly, KeyCode::Left) => AuthKind::PrivateKeyWithPassword,
                         (AuthKind::PrivateKey, KeyCode::Left) => AuthKind::PasswordOnly,
                         (AuthKind::PrivateKeyWithPassword, KeyCode::Left) => AuthKind::PrivateKey,
@@ -437,13 +441,11 @@ impl App {
                     self.open_key_picker();
                 }
             }
-            KeyCode::Enter => {
-                match self.new_connection.active_field {
-                    Field::ActionTest => self.run_test_connection(),
-                    Field::ActionSave => self.run_save_connection(),
-                    _ => {}
-                }
-            }
+            KeyCode::Enter => match self.new_connection.active_field {
+                Field::ActionTest => self.run_test_connection(),
+                Field::ActionSave => self.run_save_connection(),
+                _ => {}
+            },
             KeyCode::Backspace => {
                 self.edit_active_field(EditAction::Backspace);
             }
@@ -504,10 +506,10 @@ impl App {
                 if let Some(index) = self.delete_index.take() {
                     if index < self.connections.len() {
                         let removed = self.connections.remove(index);
-                        self.last_error.remove(&crate::model::connection_key(&removed));
+                        self.last_error
+                            .remove(&crate::model::connection_key(&removed));
                         self.save_store()?;
-                        if self.selected_saved >= self.connections.len()
-                            && self.selected_saved > 0
+                        if self.selected_saved >= self.connections.len() && self.selected_saved > 0
                         {
                             self.selected_saved -= 1;
                         }
@@ -590,7 +592,8 @@ impl App {
         self.upsert_connection(config.clone());
         self.save_store()?;
         self.sort_connections_by_recent(Some(crate::model::connection_key(&config)));
-        self.last_error.remove(&crate::model::connection_key(&config));
+        self.last_error
+            .remove(&crate::model::connection_key(&config));
         self.set_status(format!("Connected to {}", config.label()));
         Ok(())
     }
@@ -611,7 +614,9 @@ impl App {
 
     fn advance_field(&mut self, forward: bool) {
         let fields = self.active_fields();
-        if let Some(pos) = fields.iter().position(|field| *field == self.new_connection.active_field)
+        if let Some(pos) = fields
+            .iter()
+            .position(|field| *field == self.new_connection.active_field)
         {
             let next = if forward {
                 (pos + 1) % fields.len()
@@ -706,7 +711,9 @@ impl App {
             anyhow::bail!("New password confirmation does not match");
         }
 
-        let salt = Base64.decode(&self.master.salt_b64).context("decode salt")?;
+        let salt = Base64
+            .decode(&self.master.salt_b64)
+            .context("decode salt")?;
         let current_key = crate::storage::derive_key(&self.master_change.current, &salt);
         let check = crate::storage::decrypt_string(&self.master.check, &current_key)
             .context("verify current password")?;
@@ -714,8 +721,7 @@ impl App {
             anyhow::bail!("Current master password incorrect");
         }
 
-        let (new_master, new_key) =
-            create_master_from_password(&self.master_change.new_password)?;
+        let (new_master, new_key) = create_master_from_password(&self.master_change.new_password)?;
         let stored = crate::model::StoreFile {
             master: new_master.clone(),
             connections: self
@@ -847,10 +853,7 @@ impl App {
 
     fn handle_file_picker_key(&mut self, key: KeyEvent) -> Result<bool> {
         if let Some(picker) = &mut self.file_picker {
-            let transfer_mode = self
-                .transfer
-                .as_ref()
-                .map(|t| (t.direction, t.step));
+            let transfer_mode = self.transfer.as_ref().map(|t| (t.direction, t.step));
             let only_dirs = transfer_mode
                 .map(|m| m.0 == TransferDirection::Download && m.1 == TransferStep::PickTarget)
                 .unwrap_or(false);
@@ -905,7 +908,15 @@ impl App {
                 KeyCode::Backspace => {
                     if let Some(parent) = picker.cwd.parent() {
                         picker.cwd = parent.to_path_buf();
-                        picker.entries = read_dir_entries_filtered(&picker.cwd, transfer_mode.map(|m| m.0 == TransferDirection::Download && m.1 == TransferStep::PickTarget).unwrap_or(false))?;
+                        picker.entries = read_dir_entries_filtered(
+                            &picker.cwd,
+                            transfer_mode
+                                .map(|m| {
+                                    m.0 == TransferDirection::Download
+                                        && m.1 == TransferStep::PickTarget
+                                })
+                                .unwrap_or(false),
+                        )?;
                         picker.selected = 0;
                     }
                 }
@@ -970,10 +981,7 @@ impl App {
         let Some(mut picker) = self.remote_picker.take() else {
             return Ok(false);
         };
-        let transfer_mode = self
-            .transfer
-            .as_ref()
-            .map(|t| (t.direction, t.step));
+        let transfer_mode = self.transfer.as_ref().map(|t| (t.direction, t.step));
         let only_dirs = picker.only_dirs;
         match key.code {
             KeyCode::Esc => {
@@ -1022,7 +1030,13 @@ impl App {
                         .cwd
                         .trim_end_matches('/')
                         .rsplit_once('/')
-                        .map(|(base, _)| if base.is_empty() { "/".to_string() } else { base.to_string() })
+                        .map(|(base, _)| {
+                            if base.is_empty() {
+                                "/".to_string()
+                            } else {
+                                base.to_string()
+                            }
+                        })
                         .unwrap_or_else(|| "/".to_string());
                     picker.cwd = new_cwd.clone();
                     picker.entries.clear();
@@ -1041,11 +1055,9 @@ impl App {
                                 self.remote_picker = Some(picker);
                                 return Ok(false);
                             };
-                            let open_conn = match self
-                                .open_connections
-                                .iter()
-                                .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
-                            {
+                            let open_conn = match self.open_connections.iter().find(|candidate| {
+                                crate::model::same_identity(&candidate.config, &conn)
+                            }) {
                                 Some(conn) => conn,
                                 None => {
                                     self.set_status("Selected connection is not connected");
@@ -1291,11 +1303,7 @@ impl App {
         self.details_height = height;
     }
 
-    pub(crate) fn history_range(
-        &self,
-        history_len: usize,
-        has_error: bool,
-    ) -> (usize, usize) {
+    pub(crate) fn history_range(&self, history_len: usize, has_error: bool) -> (usize, usize) {
         let page_size = self.history_page_size(has_error);
         if history_len == 0 {
             return (0, 0);
@@ -1357,8 +1365,7 @@ impl App {
                     }
                     Err(err) => {
                         self.record_connect_error(&snapshot, &err);
-                        self.new_connection_feedback =
-                            Some(format!("Connection failed: {err}"));
+                        self.new_connection_feedback = Some(format!("Connection failed: {err}"));
                     }
                 }
             }
@@ -1461,10 +1468,9 @@ impl App {
         } else {
             "/".to_string()
         };
-        let only_dirs = self
-            .transfer
-            .as_ref()
-            .is_some_and(|t| t.direction == TransferDirection::Upload && t.step == TransferStep::PickTarget);
+        let only_dirs = self.transfer.as_ref().is_some_and(|t| {
+            t.direction == TransferDirection::Upload && t.step == TransferStep::PickTarget
+        });
         self.open_remote_picker_at(cwd, only_dirs)
     }
 
@@ -1677,8 +1683,7 @@ impl App {
                             } else {
                                 format!(
                                     "Transfer progress: {} / {}",
-                                    transfer.progress_bytes,
-                                    total
+                                    transfer.progress_bytes, total
                                 )
                             });
                             new_progress = Some(transfer.progress_bytes);
@@ -1772,7 +1777,11 @@ fn resolve_picker_start(current: &str) -> Result<PathBuf> {
 
 fn load_last_log(path: &Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
-    content.lines().rev().find(|line| !line.trim().is_empty()).map(|line| line.to_string())
+    content
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.to_string())
 }
 
 fn load_log_lines(path: &Path, max_lines: usize) -> VecDeque<String> {
