@@ -7,6 +7,8 @@ use ssh2::Session;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ConnectionConfig {
+    #[serde(default)]
+    pub(crate) name: String,
     pub(crate) user: String,
     pub(crate) host: String,
     pub(crate) auth: AuthConfig,
@@ -16,14 +18,11 @@ pub(crate) struct ConnectionConfig {
 
 impl ConnectionConfig {
     pub(crate) fn label(&self) -> String {
-        let auth_label = match &self.auth {
-            AuthConfig::Password { .. } => "pw",
-            AuthConfig::PrivateKey { password: None, .. } => "pk",
-            AuthConfig::PrivateKey {
-                password: Some(_), ..
-            } => "pk+pw",
-        };
-        format!("{}@{} ({})", self.user, self.host, auth_label)
+        if self.name.trim().is_empty() {
+            self.host.clone()
+        } else {
+            self.name.clone()
+        }
     }
 }
 
@@ -65,6 +64,8 @@ pub(crate) struct EncryptedBlob {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct StoredConnection {
+    #[serde(default)]
+    pub(crate) name: String,
     pub(crate) user: String,
     pub(crate) host: String,
     pub(crate) auth: StoredAuthConfig,
@@ -118,6 +119,7 @@ pub(crate) enum Mode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Field {
+    Name,
     User,
     Host,
     AuthType,
@@ -143,6 +145,7 @@ pub(crate) enum AuthKind {
 
 #[derive(Debug, Clone)]
 pub(crate) struct NewConnectionState {
+    pub(crate) name: String,
     pub(crate) user: String,
     pub(crate) host: String,
     pub(crate) auth_kind: AuthKind,
@@ -154,6 +157,7 @@ pub(crate) struct NewConnectionState {
 impl Default for NewConnectionState {
     fn default() -> Self {
         Self {
+            name: String::new(),
             user: String::new(),
             host: String::new(),
             auth_kind: AuthKind::PasswordOnly,

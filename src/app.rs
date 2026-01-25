@@ -25,6 +25,12 @@ use crate::storage::{
     config_path, create_master_from_password, load_or_init_store, save_store,
 };
 
+#[derive(Debug, Clone, Copy)]
+enum NoticeAction {
+    ConnectTerminal,
+    ConnectUpload,
+}
+
 pub(crate) struct App {
     pub(crate) config_path: PathBuf,
     pub(crate) master: crate::model::MasterConfig,
@@ -46,6 +52,7 @@ pub(crate) struct App {
     pub(crate) try_result: Option<TryResult>,
     pub(crate) new_connection_feedback: Option<String>,
     pub(crate) notice: Option<Notice>,
+    notice_action: Option<NoticeAction>,
     pub(crate) show_help: bool,
     pub(crate) show_header: bool,
     pub(crate) history_page: usize,
@@ -80,6 +87,7 @@ impl App {
             try_result: None,
             new_connection_feedback: None,
             notice: None,
+            notice_action: None,
             show_help: true,
             show_header: true,
             history_page: 0,
@@ -94,6 +102,24 @@ impl App {
         if self.notice.is_some() {
             if matches!(key.code, KeyCode::Enter | KeyCode::Esc) {
                 self.notice = None;
+                if matches!(key.code, KeyCode::Enter) {
+                    if let Some(action) = self.notice_action.take() {
+                        if let Some(config) = self.connect_selected() {
+                            match action {
+                                NoticeAction::ConnectTerminal => {
+                                    self.pending_action = Some(AppAction::OpenTerminal);
+                                }
+                                NoticeAction::ConnectUpload => {
+                                    self.start_transfer(config);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if matches!(key.code, KeyCode::Char('c')) {
+                self.notice = None;
+                self.notice_action = None;
+                self.connect_selected();
             }
             return Ok(false);
         }
@@ -114,6 +140,14 @@ impl App {
             Mode::NewConnection => self.handle_new_connection_key(key),
             Mode::ChangeMasterPassword => self.handle_master_password_key(key),
             Mode::ConfirmDelete => self.handle_confirm_delete_key(key),
+        }
+    }
+
+    pub(crate) fn notice_action_label(&self) -> Option<&'static str> {
+        match self.notice_action {
+            Some(NoticeAction::ConnectTerminal) => Some("connect and open the terminal"),
+            Some(NoticeAction::ConnectUpload) => Some("connect and select what to upload"),
+            None => None,
         }
     }
 
@@ -192,20 +226,28 @@ impl App {
                 self.show_header = !self.show_header;
             }
             KeyCode::Char('t') => {
-                if self.open_connections.is_empty() {
-                    self.status = "No open connections".to_string();
-                } else {
+                if self.selected_connected_connection().is_some() {
                     self.pending_action = Some(AppAction::OpenTerminal);
+                } else {
+                    self.notice = Some(Notice {
+                        title: "Not connected".to_string(),
+                        message: "Please connect to the host machine first.".to_string(),
+                    });
+                    self.notice_action = Some(NoticeAction::ConnectTerminal);
                 }
             }
-            KeyCode::Char('f') => {
+            KeyCode::Char('u') => {
                 if let Some(conn) = self.selected_connected_connection() {
                     self.start_transfer(conn);
                 } else {
-                    self.status = "Selected connection is not connected".to_string();
+                    self.notice = Some(Notice {
+                        title: "Not connected".to_string(),
+                        message: "Please connect to the host machine first.".to_string(),
+                    });
+                    self.notice_action = Some(NoticeAction::ConnectUpload);
                 }
             }
-            KeyCode::Char('m') => {
+            KeyCode::Char('o') => {
                 self.mode = Mode::ChangeMasterPassword;
                 self.master_change = MasterPasswordState::default();
                 self.status = "Update master password".to_string();
@@ -410,6 +452,11 @@ impl App {
         if self.new_connection.host.trim().is_empty() {
             anyhow::bail!("Host is required");
         }
+        let name = if self.new_connection.name.trim().is_empty() {
+            self.new_connection.host.trim().to_string()
+        } else {
+            self.new_connection.name.trim().to_string()
+        };
 
         let auth = match self.new_connection.auth_kind {
             AuthKind::PasswordOnly => {
@@ -444,6 +491,7 @@ impl App {
         };
 
         Ok(ConnectionConfig {
+            name,
             user: self.new_connection.user.trim().to_string(),
             host: self.new_connection.host.trim().to_string(),
             auth,
@@ -500,7 +548,7 @@ impl App {
     }
 
     fn active_fields(&self) -> Vec<Field> {
-        let mut fields = vec![Field::User, Field::Host, Field::AuthType];
+        let mut fields = vec![Field::Name, Field::User, Field::Host, Field::AuthType];
         match self.new_connection.auth_kind {
             AuthKind::PasswordOnly => {
                 fields.push(Field::Password);
@@ -518,6 +566,7 @@ impl App {
 
     fn edit_active_field(&mut self, action: EditAction) {
         let target = match self.new_connection.active_field {
+            Field::Name => &mut self.new_connection.name,
             Field::User => &mut self.new_connection.user,
             Field::Host => &mut self.new_connection.host,
             Field::KeyPath => &mut self.new_connection.key_path,
@@ -621,6 +670,21 @@ impl App {
                 .collect::<Result<Vec<_>>>()?,
         };
         save_store(&self.config_path, &stored)
+    }
+
+    fn connect_selected(&mut self) -> Option<ConnectionConfig> {
+        if let Some(config) = self.connections.get(self.selected_saved).cloned() {
+            if let Err(err) = self.connect_and_open(config.clone()) {
+                self.record_connect_error(&config, &err);
+                self.status = format!("Connection failed: {err}");
+                None
+            } else {
+                Some(config)
+            }
+        } else {
+            self.status = "No saved connection selected".to_string();
+            None
+        }
     }
 
     fn open_file_picker(&mut self) -> Result<()> {
@@ -944,6 +1008,7 @@ impl App {
 
     fn prefill_new_connection(&self, config: &ConnectionConfig) -> NewConnectionState {
         let mut state = NewConnectionState::default();
+        state.name = config.name.clone();
         state.user = config.user.clone();
         state.host = config.host.clone();
         match &config.auth {

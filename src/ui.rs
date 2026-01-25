@@ -10,8 +10,9 @@ use crate::app::App;
 use crate::model::{AuthConfig, AuthKind, Field, MasterField, Mode};
 
 const HELP_TEXT: &str =
-    "t = terminal | f = transfer | m = master pw | h = toggle header | q = quit";
-const CONNECTION_COMMANDS: &str = "n new | e edit | c connect | d disconnect | x delete";
+    "(t)erminal | (u)pload | (o)ptions | (h)eader toggle | (q)uit";
+const CONNECTION_COMMANDS: &str =
+    "(n)ew | (e)dit | (c)onnect | (d)isconnect | (x)delete";
 const LABEL_WIDTH: usize = 9;
 
 pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
@@ -133,7 +134,7 @@ fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .highlight_symbol(">");
     let list = list.highlight_symbol(Span::styled(
         ">",
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
     ));
     let list_area = Rect {
         x: inner.x,
@@ -219,6 +220,10 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
             "Not connected"
         };
         let mut lines = vec![
+            Line::from(vec![
+                Span::styled("Name: ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(conn.label()),
+            ]),
             Line::from(vec![
                 Span::styled("User: ", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(&conn.user),
@@ -332,12 +337,23 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         .split(inner);
 
     let mut lines = Vec::new();
+    let name_row;
     let user_row;
     let host_row;
     let auth_row;
     let mut key_row = None;
     let mut pass_row = None;
     let mut row_idx = 0usize;
+
+    name_row = Some(row_idx);
+    lines.push(field_line(
+        "Name",
+        &app.new_connection.name,
+        app.new_connection.active_field == Field::Name,
+        false,
+        LABEL_WIDTH,
+    ));
+    row_idx += 1;
 
     user_row = Some(row_idx);
     lines.push(field_line(
@@ -418,12 +434,13 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         )));
     }
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(paragraph, layout[0]);
     render_input_cursor(
         frame,
         app,
         layout[0],
+        name_row,
         user_row,
         host_row,
         auth_row,
@@ -459,9 +476,14 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
     };
     let area = centered_rect(80, 70, frame.area());
     frame.render_widget(Clear, area);
+    let title = if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickSource) {
+        "Pick source file or folder"
+    } else {
+        "Pick key file"
+    };
     let block = Block::default()
         .title(Line::from(Span::styled(
-            "Pick key file",
+            title,
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         )))
         .borders(Borders::ALL);
@@ -499,7 +521,7 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol(">> ");
+        .highlight_symbol(Span::styled(">> ", Style::default().fg(Color::White)));
     frame.render_stateful_widget(
         list,
         layout[1],
@@ -550,7 +572,7 @@ fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol(">> ");
+        .highlight_symbol(Span::styled(">> ", Style::default().fg(Color::White)));
     frame.render_stateful_widget(
         list,
         inner,
@@ -612,7 +634,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-            .highlight_symbol(">> ");
+            .highlight_symbol(Span::styled(">> ", Style::default().fg(Color::White)));
         frame.render_stateful_widget(
             list,
             layout[1],
@@ -840,12 +862,27 @@ fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
     let message = Paragraph::new(notice.message.as_str()).wrap(Wrap { trim: true });
     frame.render_widget(message, layout[0]);
 
-    let footer = Paragraph::new(Line::from(vec![
-        Span::raw("Press "),
-        Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to close."),
-    ]))
-    .style(Style::default().fg(Color::Gray));
+    let footer = if let Some(label) = app.notice_action_label() {
+        Paragraph::new(Line::from(vec![
+            Span::raw("Press "),
+            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to "),
+            Span::raw(label),
+            Span::raw(", "),
+            Span::styled("c", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to connect only, "),
+            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to close."),
+        ]))
+        .style(Style::default().fg(Color::Gray))
+    } else {
+        Paragraph::new(Line::from(vec![
+            Span::raw("Press "),
+            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to close."),
+        ]))
+        .style(Style::default().fg(Color::Gray))
+    };
     frame.render_widget(footer, layout[1]);
 }
 
@@ -861,12 +898,8 @@ fn field_line(
     } else {
         value.to_string()
     };
-    let indicator = "> ";
-    let indicator_style = if active {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
+    let indicator = if active { "> " } else { "  " };
+    let indicator_style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
     let spans = vec![
         Span::styled(indicator, indicator_style),
         Span::styled(
@@ -879,12 +912,8 @@ fn field_line(
 }
 
 fn action_line(label: &str, active: bool) -> Line<'static> {
-    let indicator = "> ";
-    let indicator_style = if active {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
+    let indicator = if active { "> " } else { "  " };
+    let indicator_style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
     let spans = vec![
         Span::styled(indicator, indicator_style),
         Span::styled(format!("{label}"), Style::default().add_modifier(Modifier::BOLD)),
@@ -896,6 +925,7 @@ fn render_input_cursor(
     frame: &mut Frame<'_>,
     app: &App,
     area: Rect,
+    name_row: Option<usize>,
     user_row: Option<usize>,
     host_row: Option<usize>,
     _auth_row: Option<usize>,
@@ -903,6 +933,7 @@ fn render_input_cursor(
     pass_row: Option<usize>,
 ) {
     let (row, col) = match app.new_connection.active_field {
+        Field::Name => (name_row, app.new_connection.name.chars().count()),
         Field::User => (user_row, app.new_connection.user.chars().count()),
         Field::Host => (host_row, app.new_connection.host.chars().count()),
         Field::AuthType => return,

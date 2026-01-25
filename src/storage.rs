@@ -161,6 +161,7 @@ pub(crate) fn encrypt_connection(conn: &ConnectionConfig, key: &[u8]) -> Result<
         }
     };
     Ok(StoredConnection {
+        name: conn.name.clone(),
         user: conn.user.clone(),
         host: conn.host.clone(),
         auth,
@@ -183,7 +184,13 @@ pub(crate) fn decrypt_connection(conn: StoredConnection, key: &[u8]) -> Result<C
             }
         }
     };
+    let name = if conn.name.trim().is_empty() {
+        conn.host.clone()
+    } else {
+        conn.name
+    };
     Ok(ConnectionConfig {
+        name,
         user: conn.user,
         host: conn.host,
         auth,
