@@ -14,8 +14,8 @@ use ratatui::backend::CrosstermBackend;
 
 use crate::model::{
     AppAction, AuthConfig, AuthKind, ConnectionConfig, Field, FileEntry, FilePickerState,
-    HistoryEntry, HistoryState, MasterField, MasterPasswordState, Mode, NewConnectionState,
-    Notice, OpenConnection, TryResult,
+    HistoryEntry, HistoryState, KeyPickerState, MasterField, MasterPasswordState, Mode,
+    NewConnectionState, Notice, OpenConnection, TryResult,
 };
 use crate::ssh::{connect_ssh, expand_tilde, run_ssh_terminal};
 use crate::storage::{
@@ -35,6 +35,7 @@ pub(crate) struct App {
     pub(crate) master_change: MasterPasswordState,
     pub(crate) status: String,
     pub(crate) file_picker: Option<FilePickerState>,
+    pub(crate) key_picker: Option<KeyPickerState>,
     pub(crate) pending_action: Option<AppAction>,
     pub(crate) last_error: HashMap<String, String>,
     pub(crate) edit_index: Option<usize>,
@@ -42,6 +43,9 @@ pub(crate) struct App {
     pub(crate) try_result: Option<TryResult>,
     pub(crate) new_connection_feedback: Option<String>,
     pub(crate) notice: Option<Notice>,
+    pub(crate) show_help: bool,
+    pub(crate) show_header: bool,
+    pub(crate) details_scroll: u16,
 }
 
 impl App {
@@ -61,6 +65,7 @@ impl App {
             master_change: MasterPasswordState::default(),
             status: "Ready".to_string(),
             file_picker: None,
+            key_picker: None,
             pending_action: None,
             last_error: HashMap::new(),
             edit_index: None,
@@ -68,6 +73,9 @@ impl App {
             try_result: None,
             new_connection_feedback: None,
             notice: None,
+            show_help: true,
+            details_scroll: 0,
+            show_header: true,
         })
     }
 
@@ -146,6 +154,10 @@ impl App {
                     self.status = "No saved connection selected".to_string();
                 }
             }
+            KeyCode::Char('h') => {
+                self.show_help = !self.show_help;
+                self.show_header = !self.show_header;
+            }
             KeyCode::Char('t') => {
                 if self.open_connections.is_empty() {
                     self.status = "No open connections".to_string();
@@ -178,14 +190,22 @@ impl App {
                     self.status = "Confirm delete".to_string();
                 }
             }
+            KeyCode::PageUp => {
+                self.details_scroll = self.details_scroll.saturating_sub(1);
+            }
+            KeyCode::PageDown => {
+                self.details_scroll = self.details_scroll.saturating_add(1);
+            }
             KeyCode::Up => {
                 if self.selected_saved > 0 {
                     self.selected_saved -= 1;
+                    self.details_scroll = 0;
                 }
             }
             KeyCode::Down => {
                 if self.selected_saved + 1 < self.connections.len() {
                     self.selected_saved += 1;
+                    self.details_scroll = 0;
                 }
             }
             KeyCode::Left => {
@@ -206,6 +226,9 @@ impl App {
     fn handle_new_connection_key(&mut self, key: KeyEvent) -> Result<bool> {
         if self.file_picker.is_some() {
             return self.handle_file_picker_key(key);
+        }
+        if self.key_picker.is_some() {
+            return self.handle_key_picker_key(key);
         }
         if self.try_result.is_some() {
             match key.code {
@@ -242,6 +265,11 @@ impl App {
             KeyCode::F(2) => {
                 if self.new_connection.active_field == Field::KeyPath {
                     self.open_file_picker()?;
+                }
+            }
+            KeyCode::F(3) => {
+                if self.new_connection.active_field == Field::KeyPath {
+                    self.open_key_picker();
                 }
             }
             KeyCode::Enter => {
@@ -555,6 +583,15 @@ impl App {
         Ok(())
     }
 
+    fn open_key_picker(&mut self) {
+        let keys = self.collect_key_candidates();
+        if keys.is_empty() {
+            self.status = "No known keys yet".to_string();
+            return;
+        }
+        self.key_picker = Some(KeyPickerState { keys, selected: 0 });
+    }
+
     fn handle_file_picker_key(&mut self, key: KeyEvent) -> Result<bool> {
         if let Some(picker) = &mut self.file_picker {
             match key.code {
@@ -589,6 +626,38 @@ impl App {
                                 entry.path.to_string_lossy().into_owned();
                             self.file_picker = None;
                         }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(false)
+    }
+
+    fn handle_key_picker_key(&mut self, key: KeyEvent) -> Result<bool> {
+        if let Some(picker) = &mut self.key_picker {
+            match key.code {
+                KeyCode::Esc => {
+                    self.key_picker = None;
+                }
+                KeyCode::Up => {
+                    if picker.selected > 0 {
+                        picker.selected -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if picker.selected + 1 < picker.keys.len() {
+                        picker.selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(entry) = picker.keys.get(picker.selected).cloned() {
+                        self.new_connection.key_path = entry.path;
+                        if let Some(pass) = entry.password {
+                            self.new_connection.password = pass;
+                            self.new_connection.auth_kind = AuthKind::PrivateKeyWithPassword;
+                        }
+                        self.key_picker = None;
                     }
                 }
                 _ => {}
@@ -690,6 +759,22 @@ impl App {
             }
         }
         state
+    }
+
+    fn collect_key_candidates(&self) -> Vec<crate::model::KeyCandidate> {
+        let mut candidates = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for conn in &self.connections {
+            if let AuthConfig::PrivateKey { path, password } = &conn.auth {
+                if seen.insert(path.clone()) {
+                    candidates.push(crate::model::KeyCandidate {
+                        path: path.clone(),
+                        password: password.clone(),
+                    });
+                }
+            }
+        }
+        candidates
     }
 }
 

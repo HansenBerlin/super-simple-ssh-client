@@ -10,7 +10,7 @@ use crate::app::App;
 use crate::model::{AuthConfig, AuthKind, Field, MasterField, Mode};
 
 const HELP_TEXT: &str =
-    "n = new | e = edit | c = connect | d = disconnect | t = terminal | m = master pw | x = delete | q = quit";
+    "n = new | e = edit | c = connect | d = disconnect | t = terminal | m = master pw | x = delete | h = toggle header | q = quit";
 
 pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
     let layout = Layout::default()
@@ -23,13 +23,33 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)].as_ref())
         .split(layout[0]);
 
-    draw_saved_list(frame, app, body[0]);
+    let left = if app.show_header {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(1)].as_ref())
+            .split(body[0])
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1)].as_ref())
+            .split(body[0])
+    };
+
+    if app.show_header {
+        draw_app_header(frame, left[0]);
+        draw_saved_list(frame, app, left[1]);
+    } else {
+        draw_saved_list(frame, app, left[0]);
+    }
     draw_open_tabs(frame, app, body[1]);
 
     if app.mode == Mode::NewConnection {
         draw_new_connection_modal(frame, app);
         if app.file_picker.is_some() {
             draw_file_picker_modal(frame, app);
+        }
+        if app.key_picker.is_some() {
+            draw_key_picker_modal(frame, app);
         }
         if app.try_result.is_some() {
             draw_try_result_modal(frame, app);
@@ -47,15 +67,26 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let header_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
     let connected: HashSet<String> = app
         .open_connections
         .iter()
         .map(|conn| crate::model::connection_key(&conn.config))
         .collect();
+    let list_height = area.height.saturating_sub(2) as usize;
+    let (start, end) = if app.connections.is_empty() || list_height == 0 {
+        (0, 0)
+    } else if app.selected_saved + 1 > list_height {
+        let start = app.selected_saved + 1 - list_height;
+        (start, (start + list_height).min(app.connections.len()))
+    } else {
+        (0, app.connections.len().min(list_height))
+    };
+
     let items: Vec<ListItem> = if app.connections.is_empty() {
         vec![ListItem::new("No saved connections")]
     } else {
-        app.connections
+        app.connections[start..end]
             .iter()
             .map(|conn| {
                 let key = crate::model::connection_key(conn);
@@ -82,39 +113,61 @@ fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .title("Available connections")
-                .borders(Borders::ALL),
-        )
+        .block(Block::default().title(Line::from(Span::styled(
+            "Available connections",
+            header_style,
+        ))).borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol(">> ");
 
-    frame.render_stateful_widget(
-        list,
-        area,
-        &mut list_state(app.selected_saved, app.connections.len()),
-    );
+    let mut state = ratatui::widgets::ListState::default();
+    if app.connections.is_empty() {
+        state.select(None);
+    } else {
+        let rel = app.selected_saved.saturating_sub(start);
+        state.select(Some(rel));
+    }
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn draw_app_header(frame: &mut Frame<'_>, area: Rect) {
+    let title = Paragraph::new("SUPER SIMPLE SSH 0.1.0")
+        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::ALL))
+        .alignment(Alignment::Center);
+    frame.render_widget(title, area);
 }
 
 fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let header_style = Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD);
     let tabs_area = Rect {
         x: area.x,
         y: area.y,
         width: area.width,
         height: 3,
     };
-    let body_area = Rect {
-        x: area.x,
-        y: area.y + 3,
-        width: area.width,
-        height: area.height.saturating_sub(3),
+    let (body_area, help_area) = if app.show_help {
+        (
+            Rect {
+                x: area.x,
+                y: area.y + 3,
+                width: area.width,
+                height: area.height.saturating_sub(3),
+            },
+            Some(tabs_area),
+        )
+    } else {
+        (area, None)
     };
-
-    let help = Paragraph::new(HELP_TEXT)
-        .block(Block::default().title("Help").borders(Borders::ALL))
-        .style(Style::default().fg(Color::Gray));
-    frame.render_widget(help, tabs_area);
+    if let Some(help_area) = help_area {
+        let help = Paragraph::new(HELP_TEXT)
+            .block(Block::default().title(Line::from(Span::styled(
+                "Help",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ))).borders(Borders::ALL))
+            .style(Style::default().fg(Color::Gray));
+        frame.render_widget(help, help_area);
+    }
 
     let connected: HashSet<String> = app
         .open_connections
@@ -172,7 +225,7 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
         if conn.history.is_empty() {
             lines.push(Line::from("  (none)"));
         } else {
-            for entry in conn.history.iter().rev().take(5) {
+            for entry in conn.history.iter().rev() {
                 lines.push(Line::from(format!(
                     "  {}",
                     crate::model::format_history_entry(entry)
@@ -184,15 +237,22 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Connection details"),
+                    .title(Line::from(Span::styled(
+                        "Connection details",
+                        header_style,
+                    ))),
             )
             .wrap(Wrap { trim: true })
+            .scroll((app.details_scroll, 0))
     } else {
         Paragraph::new("No saved connection selected")
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("Connection details"),
+                    .title(Line::from(Span::styled(
+                        "Connection details",
+                        header_style,
+                    ))),
             )
             .alignment(Alignment::Center)
     };
@@ -208,7 +268,12 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
     } else {
         "New connection"
     };
-    let block = Block::default().title(title).borders(Borders::ALL);
+    let block = Block::default()
+        .title(Line::from(Span::styled(
+            title,
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL);
     frame.render_widget(block, area);
 
     let inner = Rect {
@@ -220,14 +285,7 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Min(3),
-                Constraint::Length(3),
-                Constraint::Length(2),
-            ]
-            .as_ref(),
-        )
+        .constraints([Constraint::Min(3), Constraint::Length(2)].as_ref())
         .split(inner);
 
     let mut lines = Vec::new();
@@ -260,7 +318,7 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
             false,
         ));
         lines.push(Line::from(Span::styled(
-            "F2 to browse for key file",
+            "F2 to browse for key file | F3 to pick from recent keys",
             Style::default().fg(Color::Gray),
         )));
     }
@@ -276,17 +334,7 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         ));
     }
 
-    if let Some(message) = &app.new_connection_feedback {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            message.as_str(),
-            Style::default().fg(Color::Red),
-        )));
-    }
-
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, layout[0]);
-
+    lines.push(Line::from(""));
     let actions = vec![
         action_line(
             "Test connection",
@@ -297,8 +345,18 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
             app.new_connection.active_field == Field::ActionSave,
         ),
     ];
-    let actions_paragraph = Paragraph::new(actions).wrap(Wrap { trim: true });
-    frame.render_widget(actions_paragraph, layout[1]);
+    lines.extend(actions);
+
+    if let Some(message) = &app.new_connection_feedback {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            message.as_str(),
+            Style::default().fg(Color::Red),
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, layout[0]);
 
     let footer = Paragraph::new(Line::from(vec![
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
@@ -311,7 +369,7 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         Span::raw(" to cancel"),
     ]))
     .style(Style::default().fg(Color::Gray));
-    frame.render_widget(footer, layout[2]);
+    frame.render_widget(footer, layout[1]);
 }
 
 fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
@@ -322,7 +380,10 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
     let area = centered_rect(80, 70, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
-        .title("Pick key file")
+        .title(Line::from(Span::styled(
+            "Pick key file",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
@@ -370,11 +431,56 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(footer, layout[2]);
 }
 
+fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
+    let picker = match &app.key_picker {
+        Some(picker) => picker,
+        None => return,
+    };
+    let area = centered_rect(70, 60, frame.area());
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title(Line::from(Span::styled(
+            "Pick recent key",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL);
+    frame.render_widget(block, area);
+
+    let inner = Rect {
+        x: area.x + 2,
+        y: area.y + 2,
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(4),
+    };
+
+    let items: Vec<ListItem> = picker
+        .keys
+        .iter()
+        .map(|entry| {
+            let suffix = if entry.password.is_some() { " (pw)" } else { "" };
+            ListItem::new(format!("{}{}", entry.path, suffix))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL))
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(
+        list,
+        inner,
+        &mut list_state(picker.selected, picker.keys.len()),
+    );
+}
+
 fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
     let area = centered_rect(60, 45, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
-        .title("Change master password")
+        .title(Line::from(Span::styled(
+            "Change master password",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
@@ -423,7 +529,10 @@ fn draw_confirm_delete_modal(frame: &mut Frame<'_>, app: &App) {
     let area = centered_rect(50, 30, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
-        .title("Delete connection?")
+        .title(Line::from(Span::styled(
+            "Delete connection?",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
         .borders(Borders::ALL);
     frame.render_widget(block, area);
 
@@ -467,7 +576,12 @@ fn draw_try_result_modal(frame: &mut Frame<'_>, app: &App) {
     let area = centered_rect(50, 25, frame.area());
     frame.render_widget(Clear, area);
     let title = if result.success { "Try success" } else { "Try failed" };
-    let block = Block::default().title(title).borders(Borders::ALL);
+    let block = Block::default()
+        .title(Line::from(Span::styled(
+            title,
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL);
     frame.render_widget(block, area);
 
     let inner = Rect {
@@ -501,7 +615,12 @@ fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
     };
     let area = centered_rect(50, 25, frame.area());
     frame.render_widget(Clear, area);
-    let block = Block::default().title(notice.title.as_str()).borders(Borders::ALL);
+    let block = Block::default()
+        .title(Line::from(Span::styled(
+            notice.title.as_str(),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL);
     frame.render_widget(block, area);
 
     let inner = Rect {

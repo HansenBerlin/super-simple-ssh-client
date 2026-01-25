@@ -198,6 +198,18 @@ pub(crate) struct FilePickerState {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct KeyPickerState {
+    pub(crate) keys: Vec<KeyCandidate>,
+    pub(crate) selected: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct KeyCandidate {
+    pub(crate) path: String,
+    pub(crate) password: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct TryResult {
     pub(crate) success: bool,
     pub(crate) message: String,
