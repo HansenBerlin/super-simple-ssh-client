@@ -46,15 +46,15 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
 
     if app.mode == Mode::NewConnection {
         draw_new_connection_modal(frame, app);
-        if app.file_picker.is_some() {
-            draw_file_picker_modal(frame, app);
-        }
-        if app.key_picker.is_some() {
-            draw_key_picker_modal(frame, app);
-        }
         if app.try_result.is_some() {
             draw_try_result_modal(frame, app);
         }
+    }
+    if app.file_picker.is_some() {
+        draw_file_picker_modal(frame, app);
+    }
+    if app.key_picker.is_some() {
+        draw_key_picker_modal(frame, app);
     }
     if app.remote_picker.is_some() {
         draw_remote_picker_modal(frame, app);
@@ -482,7 +482,7 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
     );
 
     let footer_text = if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickSource) {
-        "Enter to open file, S to select folder, Backspace to up, Esc to cancel"
+        "Enter to open, S to select folder, Backspace to up, Esc to cancel"
     } else {
         "Enter to open/select, Backspace to up, Esc to cancel"
     };
@@ -573,17 +573,29 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL))
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol(">> ");
-    frame.render_stateful_widget(
-        list,
-        layout[1],
-        &mut list_state(picker.selected, picker.entries.len()),
-    );
+    if picker.loading {
+        let loading = Paragraph::new("Loading...")
+            .style(Style::default().fg(Color::Gray))
+            .alignment(Alignment::Center);
+        frame.render_widget(loading, layout[1]);
+    } else if let Some(err) = &picker.error {
+        let error = Paragraph::new(err.as_str())
+            .style(Style::default().fg(Color::Red))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(error, layout[1]);
+    } else {
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL))
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+            .highlight_symbol(">> ");
+        frame.render_stateful_widget(
+            list,
+            layout[1],
+            &mut list_state(picker.selected, picker.entries.len()),
+        );
+    }
 
-    let footer = Paragraph::new("Enter to open file, S to select folder, Backspace to up, Esc to cancel")
+    let footer = Paragraph::new("Enter to open, S to select folder, Backspace to up, Esc to cancel")
         .style(Style::default().fg(Color::Gray));
     frame.render_widget(footer, layout[2]);
 }
@@ -616,7 +628,7 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| "-".to_string());
     let target = transfer
-        .target_path
+        .target_dir
         .clone()
         .unwrap_or_else(|| "-".to_string());
 

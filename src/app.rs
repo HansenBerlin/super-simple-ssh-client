@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
@@ -51,6 +52,7 @@ pub(crate) struct App {
     pub(crate) details_height: u16,
     pub(crate) transfer: Option<TransferState>,
     pub(crate) remote_picker: Option<RemotePickerState>,
+    remote_fetch: Option<mpsc::Receiver<Result<Vec<RemoteEntry>>>>,
 }
 
 impl App {
@@ -84,6 +86,7 @@ impl App {
             details_height: 0,
             transfer: None,
             remote_picker: None,
+            remote_fetch: None,
         })
     }
 
@@ -94,6 +97,7 @@ impl App {
             }
             return Ok(false);
         }
+        self.poll_remote_fetch();
         if self.transfer.is_some() {
             if self.file_picker.is_some() {
                 return self.handle_file_picker_key(key);
@@ -668,9 +672,15 @@ impl App {
                 KeyCode::Enter => {
                     if let Some(entry) = picker.entries.get(picker.selected).cloned() {
                         if entry.is_dir {
-                            picker.cwd = entry.path;
-                            picker.entries = read_dir_entries(&picker.cwd)?;
-                            picker.selected = 0;
+                            if self.transfer.as_ref().is_some_and(|t| t.step == TransferStep::PickSource) {
+                                picker.cwd = entry.path;
+                                picker.entries = read_dir_entries(&picker.cwd)?;
+                                picker.selected = 0;
+                            } else {
+                                picker.cwd = entry.path;
+                                picker.entries = read_dir_entries(&picker.cwd)?;
+                                picker.selected = 0;
+                            }
                         } else {
                             if self.transfer.as_ref().is_some_and(|t| t.step == TransferStep::PickSource) {
                                 self.select_source(entry.path, false);
@@ -729,34 +739,31 @@ impl App {
                         .rsplit_once('/')
                         .map(|(base, _)| if base.is_empty() { "/".to_string() } else { base.to_string() })
                         .unwrap_or_else(|| "/".to_string());
-                    let entries = self.read_remote_entries(&new_cwd)?;
-                    picker.cwd = new_cwd;
-                    picker.entries = entries;
+                    picker.cwd = new_cwd.clone();
+                    picker.entries.clear();
                     picker.selected = 0;
+                    picker.loading = true;
+                    picker.error = None;
+                    self.start_remote_fetch(new_cwd)?;
                 }
             }
             KeyCode::Enter => {
                 if let Some(entry) = picker.entries.get(picker.selected).cloned() {
                     if entry.is_dir {
                         let new_cwd = entry.path;
-                        let entries = self.read_remote_entries(&new_cwd)?;
-                        picker.cwd = new_cwd;
-                        picker.entries = entries;
+                        picker.cwd = new_cwd.clone();
+                        picker.entries.clear();
                         picker.selected = 0;
-                    } else {
-                        self.select_target(entry.path, false);
-                        self.transfer = self.transfer.take().map(|mut t| {
-                            t.step = TransferStep::Confirm;
-                            t
-                        });
-                        return Ok(false);
+                        picker.loading = true;
+                        picker.error = None;
+                        self.start_remote_fetch(new_cwd)?;
                     }
                 }
             }
             KeyCode::Char('s') => {
                 if let Some(entry) = picker.entries.get(picker.selected).cloned() {
                     if entry.is_dir {
-                        self.select_target(entry.path, true);
+                        self.select_target_dir(entry.path);
                         self.transfer = self.transfer.take().map(|mut t| {
                             t.step = TransferStep::Confirm;
                             t
@@ -962,8 +969,7 @@ impl App {
             step: TransferStep::PickSource,
             source_path: None,
             source_is_dir: false,
-            target_path: None,
-            target_is_dir: false,
+            target_dir: None,
         });
         if let Ok(start_dir) = resolve_picker_start("") {
             if let Ok(entries) = read_dir_entries(&start_dir) {
@@ -987,19 +993,20 @@ impl App {
 
     fn open_remote_picker(&mut self) -> Result<()> {
         let cwd = "/".to_string();
-        let entries = self.read_remote_entries(&cwd)?;
         self.remote_picker = Some(RemotePickerState {
-            cwd,
-            entries,
+            cwd: cwd.clone(),
+            entries: vec![],
             selected: 0,
+            loading: true,
+            error: None,
         });
+        self.start_remote_fetch(cwd)?;
         Ok(())
     }
 
-    fn select_target(&mut self, path: String, is_dir: bool) {
+    fn select_target_dir(&mut self, path: String) {
         if let Some(transfer) = &mut self.transfer {
-            transfer.target_path = Some(path);
-            transfer.target_is_dir = is_dir;
+            transfer.target_dir = Some(path);
             transfer.step = TransferStep::Confirm;
         }
     }
@@ -1011,7 +1018,7 @@ impl App {
         let Some(source) = transfer.source_path else {
             anyhow::bail!("Missing source");
         };
-        let Some(target) = transfer.target_path else {
+        let Some(target_dir) = transfer.target_dir else {
             anyhow::bail!("Missing target");
         };
         let Some(conn) = self.selected_connected_connection() else {
@@ -1022,13 +1029,7 @@ impl App {
             .iter()
             .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
             .context("selected connection is not connected")?;
-        crate::ssh::transfer_path(
-            &open_conn.session,
-            &source,
-            &target,
-            transfer.source_is_dir,
-            transfer.target_is_dir,
-        )?;
+        crate::ssh::transfer_path(&open_conn.session, &source, &target_dir, transfer.source_is_dir)?;
         self.status = "Transfer completed".to_string();
         Ok(())
     }
@@ -1046,39 +1047,64 @@ impl App {
         }
     }
 
-    fn read_remote_entries(&self, cwd: &str) -> Result<Vec<RemoteEntry>> {
+    fn start_remote_fetch(&mut self, cwd: String) -> Result<()> {
         let Some(conn) = self.selected_connected_connection() else {
             anyhow::bail!("Selected connection is not connected");
         };
-        let open_conn = self
-            .open_connections
-            .iter()
-            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
-            .context("selected connection is not connected")?;
-        let sftp = open_conn.session.sftp().context("open sftp")?;
-        let mut entries = Vec::new();
-        for (path, stat) in sftp.readdir(Path::new(cwd)).context("read remote dir")? {
-            let name = path
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| String::from("/"));
-            if name == "." || name == ".." {
-                continue;
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<Vec<RemoteEntry>> {
+                let session = connect_ssh(&conn)?;
+                let sftp = session.sftp().context("open sftp")?;
+                let mut entries = Vec::new();
+                for (path, stat) in sftp.readdir(Path::new(&cwd)).context("read remote dir")? {
+                    let name = path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| String::from("/"));
+                    if name == "." || name == ".." {
+                        continue;
+                    }
+                    let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
+                    let full = if cwd == "/" {
+                        format!("/{name}")
+                    } else {
+                        format!("{cwd}/{name}")
+                    };
+                    entries.push(RemoteEntry {
+                        name,
+                        path: full,
+                        is_dir,
+                    });
+                }
+                entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
+                Ok(entries)
+            })();
+            let _ = tx.send(result);
+        });
+        self.remote_fetch = Some(rx);
+        Ok(())
+    }
+
+    pub(crate) fn poll_remote_fetch(&mut self) {
+        let Some(rx) = &self.remote_fetch else {
+            return;
+        };
+        if let Ok(result) = rx.try_recv() {
+            if let Some(picker) = &mut self.remote_picker {
+                picker.loading = false;
+                match result {
+                    Ok(entries) => {
+                        picker.entries = entries;
+                        picker.error = None;
+                    }
+                    Err(err) => {
+                        picker.error = Some(err.to_string());
+                    }
+                }
             }
-            let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
-            let full = if cwd == "/" {
-                format!("/{name}")
-            } else {
-                format!("{cwd}/{name}")
-            };
-            entries.push(RemoteEntry {
-                name,
-                path: full,
-                is_dir,
-            });
+            self.remote_fetch = None;
         }
-        entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
-        Ok(entries)
     }
 
     fn collect_key_candidates(&self) -> Vec<crate::model::KeyCandidate> {

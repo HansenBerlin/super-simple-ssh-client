@@ -209,6 +209,8 @@ pub(crate) struct RemotePickerState {
     pub(crate) cwd: String,
     pub(crate) entries: Vec<RemoteEntry>,
     pub(crate) selected: usize,
+    pub(crate) loading: bool,
+    pub(crate) error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,8 +225,7 @@ pub(crate) struct TransferState {
     pub(crate) step: TransferStep,
     pub(crate) source_path: Option<PathBuf>,
     pub(crate) source_is_dir: bool,
-    pub(crate) target_path: Option<String>,
-    pub(crate) target_is_dir: bool,
+    pub(crate) target_dir: Option<String>,
 }
 
 #[derive(Debug, Clone)]

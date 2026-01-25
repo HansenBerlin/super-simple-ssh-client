@@ -76,6 +76,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
             last_tick = std::time::Instant::now();
         }
 
+        app.poll_remote_fetch();
+
         if let Some(action) = app.pending_action.take() {
             match action {
                 AppAction::OpenTerminal => {

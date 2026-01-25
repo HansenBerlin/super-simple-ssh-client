@@ -140,29 +140,19 @@ pub(crate) fn run_ssh_terminal(session: &Session) -> Result<()> {
 pub(crate) fn transfer_path(
     session: &Session,
     source: &Path,
-    target: &str,
+    target_dir: &str,
     source_is_dir: bool,
-    target_is_dir: bool,
 ) -> Result<()> {
     let sftp = session.sftp().context("open sftp")?;
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| anyhow::anyhow!("missing source filename"))?;
+    let remote_base = format!("{}/{}", target_dir.trim_end_matches('/'), name);
     if source_is_dir {
-        let remote_dir = if target_is_dir {
-            target.trim_end_matches('/').to_string()
-        } else {
-            target.to_string()
-        };
-        upload_dir(&sftp, source, &remote_dir)?;
+        upload_dir(&sftp, source, &remote_base)?;
     } else {
-        let remote_path = if target_is_dir {
-            let name = source
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .ok_or_else(|| anyhow::anyhow!("missing source filename"))?;
-            format!("{}/{}", target.trim_end_matches('/'), name)
-        } else {
-            target.to_string()
-        };
-        upload_file(&sftp, source, &remote_path)?;
+        upload_file(&sftp, source, &remote_base)?;
     }
     Ok(())
 }
