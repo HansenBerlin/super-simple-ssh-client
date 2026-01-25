@@ -605,7 +605,7 @@ fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(TRANSFER_PICKER_WIDTH, TRANSFER_PICKER_HEIGHT, frame.area());
+    let area = centered_rect(70, 60, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -642,7 +642,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(70, 50, frame.area());
+    let area = centered_rect(TRANSFER_PICKER_WIDTH, TRANSFER_PICKER_HEIGHT, frame.area());
     frame.render_widget(Clear, area);
     let title = if let Some(transfer) = &app.transfer {
         match (transfer.direction, transfer.step) {
