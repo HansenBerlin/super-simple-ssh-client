@@ -210,6 +210,17 @@ pub(crate) fn remote_size(session: &Session, path: &str, is_dir: bool) -> Result
     walk(&sftp, path)
 }
 
+pub(crate) fn remote_has_subdirs(session: &Session, path: &str) -> Result<bool> {
+    let sftp = session.sftp().context("open sftp")?;
+    for (_child, stat) in sftp.readdir(Path::new(path)).context("read remote dir")? {
+        let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
+        if is_dir {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn download_dir(sftp: &ssh2::Sftp, remote_dir: &str, local_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(local_dir).context("create local dir")?;
     for (path, stat) in sftp
@@ -246,6 +257,48 @@ fn download_file(sftp: &ssh2::Sftp, remote_path: &str, local_path: &Path) -> Res
     Ok(())
 }
 
+pub(crate) fn transfer_path_with_progress(
+    session: &Session,
+    source: &Path,
+    target_dir: &str,
+    source_is_dir: bool,
+    tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+) -> Result<()> {
+    let sftp = session.sftp().context("open sftp")?;
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| anyhow::anyhow!("missing source filename"))?;
+    let remote_base = format!("{}/{}", target_dir.trim_end_matches('/'), name);
+    if source_is_dir {
+        upload_dir_with_progress(&sftp, source, &remote_base, tx)?;
+    } else {
+        upload_file_with_progress(&sftp, source, &remote_base, tx)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn download_path_with_progress(
+    session: &Session,
+    source: &str,
+    target_dir: &Path,
+    source_is_dir: bool,
+    tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+) -> Result<()> {
+    let sftp = session.sftp().context("open sftp")?;
+    let name = Path::new(source)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| anyhow::anyhow!("missing source filename"))?;
+    let local_base = target_dir.join(name);
+    if source_is_dir {
+        download_dir_with_progress(&sftp, source, &local_base, tx)?;
+    } else {
+        download_file_with_progress(&sftp, source, &local_base, tx)?;
+    }
+    Ok(())
+}
+
 fn upload_dir(sftp: &ssh2::Sftp, local_dir: &Path, remote_dir: &str) -> Result<()> {
     let _ = sftp.mkdir(Path::new(remote_dir), 0o755);
     for entry in std::fs::read_dir(local_dir).context("read local dir")? {
@@ -276,6 +329,107 @@ fn upload_file(sftp: &ssh2::Sftp, local_path: &Path, remote_path: &str) -> Resul
     Ok(())
 }
 
+fn upload_dir_with_progress(
+    sftp: &ssh2::Sftp,
+    local_dir: &Path,
+    remote_dir: &str,
+    tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+) -> Result<()> {
+    let _ = sftp.mkdir(Path::new(remote_dir), 0o755);
+    for entry in std::fs::read_dir(local_dir).context("read local dir")? {
+        let entry = entry.context("read local dir entry")?;
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let remote_path = format!("{remote_dir}/{name}");
+        if path.is_dir() {
+            upload_dir_with_progress(sftp, &path, &remote_path, tx)?;
+        } else {
+            upload_file_with_progress(sftp, &path, &remote_path, tx)?;
+        }
+    }
+    Ok(())
+}
+
+fn upload_file_with_progress(
+    sftp: &ssh2::Sftp,
+    local_path: &Path,
+    remote_path: &str,
+    tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+) -> Result<()> {
+    let mut local = File::open(local_path).context("open local file")?;
+    let mut remote = sftp
+        .open_mode(
+            Path::new(remote_path),
+            ssh2::OpenFlags::CREATE | ssh2::OpenFlags::TRUNCATE | ssh2::OpenFlags::WRITE,
+            0o644,
+            ssh2::OpenType::File,
+        )
+        .context("open remote file")?;
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = local.read(&mut buffer).context("read local file")?;
+        if read == 0 {
+            break;
+        }
+        remote.write_all(&buffer[..read]).context("write remote file")?;
+        let _ = tx.send(crate::model::TransferUpdate::Bytes(read as u64));
+    }
+    Ok(())
+}
+
+fn download_dir_with_progress(
+    sftp: &ssh2::Sftp,
+    remote_dir: &str,
+    local_dir: &Path,
+    tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+) -> Result<()> {
+    std::fs::create_dir_all(local_dir).context("create local dir")?;
+    for (path, stat) in sftp
+        .readdir(Path::new(remote_dir))
+        .context("read remote dir")?
+    {
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| String::from("/"));
+        if name == "." || name == ".." {
+            continue;
+        }
+        let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
+        let remote_path = if remote_dir.ends_with('/') {
+            format!("{remote_dir}{name}")
+        } else {
+            format!("{remote_dir}/{name}")
+        };
+        let local_path = local_dir.join(&name);
+        if is_dir {
+            download_dir_with_progress(sftp, &remote_path, &local_path, tx)?;
+        } else {
+            download_file_with_progress(sftp, &remote_path, &local_path, tx)?;
+        }
+    }
+    Ok(())
+}
+
+fn download_file_with_progress(
+    sftp: &ssh2::Sftp,
+    remote_path: &str,
+    local_path: &Path,
+    tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+) -> Result<()> {
+    let mut remote = sftp.open(Path::new(remote_path)).context("open remote file")?;
+    let mut local = File::create(local_path).context("create local file")?;
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = remote.read(&mut buffer).context("read remote file")?;
+        if read == 0 {
+            break;
+        }
+        local.write_all(&buffer[..read]).context("write local file")?;
+        let _ = tx.send(crate::model::TransferUpdate::Bytes(read as u64));
+    }
+    Ok(())
+}
 pub(crate) fn expand_tilde(path: &str) -> PathBuf {
     if let Some(stripped) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {

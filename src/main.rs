@@ -44,7 +44,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
     loop {
         let (_, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-        let details_height = if app.show_help {
+        let details_height = if app.header_mode != crate::app::HeaderMode::Off {
             rows.saturating_sub(3)
         } else {
             rows
@@ -77,6 +77,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         }
 
         app.poll_remote_fetch();
+        app.poll_transfer_progress();
 
         if let Some(action) = app.pending_action.take() {
             match action {

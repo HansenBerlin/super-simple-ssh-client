@@ -18,12 +18,19 @@ use crate::model::{
     AppAction, AuthConfig, AuthKind, ConnectionConfig, Field, FileEntry, FilePickerState,
     HistoryEntry, HistoryState, KeyPickerState, MasterField, MasterPasswordState, Mode,
     NewConnectionState, Notice, OpenConnection, RemoteEntry, RemotePickerState, TransferDirection,
-    TransferState, TransferStep, TryResult,
+    TransferState, TransferStep, TransferUpdate, TryResult,
 };
 use crate::ssh::{connect_ssh, expand_tilde, run_ssh_terminal};
 use crate::storage::{
-    config_path, create_master_from_password, load_or_init_store, save_store,
+    config_path, create_master_from_password, load_or_init_store, log_path, save_store,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HeaderMode {
+    Help,
+    Logs,
+    Off,
+}
 
 #[derive(Debug, Clone, Copy)]
 enum NoticeAction {
@@ -34,6 +41,8 @@ enum NoticeAction {
 
 pub(crate) struct App {
     pub(crate) config_path: PathBuf,
+    pub(crate) log_path: PathBuf,
+    pub(crate) last_log: String,
     pub(crate) master: crate::model::MasterConfig,
     pub(crate) master_key: Vec<u8>,
     pub(crate) connections: Vec<ConnectionConfig>,
@@ -54,21 +63,25 @@ pub(crate) struct App {
     pub(crate) new_connection_feedback: Option<String>,
     pub(crate) notice: Option<Notice>,
     notice_action: Option<NoticeAction>,
-    pub(crate) show_help: bool,
-    pub(crate) show_header: bool,
+    pub(crate) header_mode: HeaderMode,
     pub(crate) history_page: usize,
     pub(crate) details_height: u16,
     pub(crate) transfer: Option<TransferState>,
     pub(crate) remote_picker: Option<RemotePickerState>,
     remote_fetch: Option<mpsc::Receiver<Result<Vec<RemoteEntry>>>>,
+    transfer_progress: Option<mpsc::Receiver<TransferUpdate>>,
 }
 
 impl App {
     pub(crate) fn load_with_master() -> Result<Self> {
         let config_path = config_path()?;
         let (master, master_key, connections) = load_or_init_store(&config_path)?;
+        let log_path = log_path()?;
+        let last_log = load_last_log(&log_path).unwrap_or_else(|| String::from("No logs yet"));
         let mut app = Self {
             config_path,
+            log_path,
+            last_log,
             master,
             master_key,
             connections,
@@ -89,15 +102,16 @@ impl App {
             new_connection_feedback: None,
             notice: None,
             notice_action: None,
-            show_help: true,
-            show_header: true,
+            header_mode: HeaderMode::Help,
             history_page: 0,
             details_height: 0,
             transfer: None,
             remote_picker: None,
             remote_fetch: None,
+            transfer_progress: None,
         };
         app.sort_connections_by_recent(None);
+        app.set_status("Ready");
         Ok(app)
     }
 
@@ -137,7 +151,7 @@ impl App {
             if self.remote_picker.is_some() {
                 return self.handle_remote_picker_key(key);
             }
-            if matches!(self.transfer.as_ref().map(|t| t.step), Some(TransferStep::Confirm)) {
+            if matches!(self.transfer.as_ref().map(|t| t.step), Some(TransferStep::Confirm | TransferStep::Transferring)) {
                 return self.handle_transfer_confirm(key);
             }
         }
@@ -158,12 +172,43 @@ impl App {
         }
     }
 
+    fn set_status(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.status = message.clone();
+        self.log_line(&message);
+    }
+
+    fn log_line(&mut self, message: &str) {
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let line = format!("{timestamp} | {message}");
+        if let Some(parent) = self.log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log_path)
+        {
+            use std::io::Write;
+            let _ = writeln!(file, "{line}");
+        }
+        self.last_log = line;
+    }
+
+    fn cycle_header_mode(&mut self) {
+        self.header_mode = match self.header_mode {
+            HeaderMode::Help => HeaderMode::Logs,
+            HeaderMode::Logs => HeaderMode::Off,
+            HeaderMode::Off => HeaderMode::Help,
+        };
+    }
+
     pub(crate) fn handle_terminal_mode(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
         let Some(conn) = self.selected_connected_connection() else {
-            self.status = "Selected connection is not connected".to_string();
+            self.set_status("Selected connection is not connected");
             return Ok(());
         };
         let open_conn = match self
@@ -173,7 +218,7 @@ impl App {
         {
             Some(conn) => conn,
             None => {
-                self.status = "Selected connection is not connected".to_string();
+                self.set_status("Selected connection is not connected");
                 return Ok(());
             }
         };
@@ -190,8 +235,8 @@ impl App {
         terminal.clear().ok();
 
         match result {
-            Ok(()) => self.status = "Exited terminal session".to_string(),
-            Err(err) => self.status = format!("Terminal session error: {err}"),
+            Ok(()) => self.set_status("Exited terminal session"),
+            Err(err) => self.set_status(format!("Terminal session error: {err}")),
         }
 
         Ok(())
@@ -205,7 +250,7 @@ impl App {
                 self.new_connection = NewConnectionState::default();
                 self.edit_index = None;
                 self.new_connection_feedback = None;
-                self.status = "Fill fields and press Enter to connect".to_string();
+                self.set_status("Fill fields and press Enter to connect");
             }
             KeyCode::Char('e') => {
                 if let Some(config) = self.connections.get(self.selected_saved).cloned() {
@@ -213,9 +258,9 @@ impl App {
                     self.new_connection = self.prefill_new_connection(&config);
                     self.edit_index = Some(self.selected_saved);
                     self.new_connection_feedback = None;
-                    self.status = "Edit fields and press Enter to save".to_string();
+                    self.set_status("Edit fields and press Enter to save");
                 } else {
-                    self.status = "No saved connection selected".to_string();
+                    self.set_status("No saved connection selected");
                 }
             }
             KeyCode::Char('c') => {
@@ -226,8 +271,7 @@ impl App {
                 }
             }
             KeyCode::Char('h') => {
-                self.show_help = !self.show_help;
-                self.show_header = !self.show_header;
+                self.cycle_header_mode();
             }
             KeyCode::Char('t') => {
                 if self.selected_connected_connection().is_some() {
@@ -265,15 +309,15 @@ impl App {
             KeyCode::Char('o') => {
                 self.mode = Mode::ChangeMasterPassword;
                 self.master_change = MasterPasswordState::default();
-                self.status = "Update master password".to_string();
+                self.set_status("Update master password");
             }
             KeyCode::Char('x') => {
                 if self.connections.is_empty() {
-                    self.status = "No saved connections".to_string();
+                    self.set_status("No saved connections");
                 } else {
                     self.mode = Mode::ConfirmDelete;
                     self.delete_index = Some(self.selected_saved);
-                    self.status = "Confirm delete".to_string();
+                    self.set_status("Confirm delete");
                 }
             }
             KeyCode::Tab => {
@@ -341,7 +385,7 @@ impl App {
                 self.mode = Mode::Normal;
                 self.edit_index = None;
                 self.new_connection_feedback = None;
-                self.status = "Cancelled".to_string();
+                self.set_status("Cancelled");
             }
             KeyCode::Tab | KeyCode::Down => self.advance_field(true),
             KeyCode::BackTab | KeyCode::Up => self.advance_field(false),
@@ -394,7 +438,7 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::Normal;
-                self.status = "Cancelled".to_string();
+                self.set_status("Cancelled");
             }
             KeyCode::Tab | KeyCode::Down => self.advance_master_field(true),
             KeyCode::BackTab | KeyCode::Up => self.advance_master_field(false),
@@ -403,10 +447,10 @@ impl App {
                     match self.apply_master_password_change() {
                         Ok(()) => {
                             self.mode = Mode::Normal;
-                            self.status = "Master password updated".to_string();
+                            self.set_status("Master password updated");
                         }
                         Err(err) => {
-                            self.status = format!("Master password not changed: {err}");
+                            self.set_status(format!("Master password not changed: {err}"));
                         }
                     }
                 }
@@ -430,7 +474,7 @@ impl App {
             KeyCode::Esc | KeyCode::Char('n') => {
                 self.mode = Mode::Normal;
                 self.delete_index = None;
-                self.status = "Cancelled".to_string();
+                self.set_status("Cancelled");
             }
             KeyCode::Enter | KeyCode::Char('y') => {
                 if let Some(index) = self.delete_index.take() {
@@ -443,7 +487,7 @@ impl App {
                         {
                             self.selected_saved -= 1;
                         }
-                        self.status = "Connection removed".to_string();
+                        self.set_status("Connection removed");
                     }
                 }
                 self.mode = Mode::Normal;
@@ -523,7 +567,7 @@ impl App {
         self.save_store()?;
         self.sort_connections_by_recent(Some(crate::model::connection_key(&config)));
         self.last_error.remove(&crate::model::connection_key(&config));
-        self.status = format!("Connected to {}", config.label());
+        self.set_status(format!("Connected to {}", config.label()));
         Ok(())
     }
 
@@ -535,7 +579,7 @@ impl App {
             self.connections.remove(index);
             self.upsert_connection(config);
             self.save_store()?;
-            self.status = "Connection updated".to_string();
+            self.set_status("Connection updated");
             return Ok(());
         }
         self.connect_and_open(config)
@@ -691,20 +735,20 @@ impl App {
         if let Some(config) = self.connections.get(self.selected_saved).cloned() {
             if let Err(err) = self.connect_and_open(config.clone()) {
                 self.record_connect_error(&config, &err);
-                self.status = format!("Connection failed: {err}");
+                self.set_status(format!("Connection failed: {err}"));
                 None
             } else {
                 Some(config)
             }
         } else {
-            self.status = "No saved connection selected".to_string();
+            self.set_status("No saved connection selected");
             None
         }
     }
 
     fn disconnect_selected(&mut self) {
         let Some(config) = self.connections.get(self.selected_saved) else {
-            self.status = "No saved connection selected".to_string();
+            self.set_status("No saved connection selected");
             return;
         };
         if let Some(index) = self
@@ -716,9 +760,9 @@ impl App {
             if self.selected_tab > 0 && self.selected_tab >= index {
                 self.selected_tab = self.selected_tab.saturating_sub(1);
             }
-            self.status = "Disconnected".to_string();
+            self.set_status("Disconnected");
         } else {
-            self.status = "Selected connection is not connected".to_string();
+            self.set_status("Selected connection is not connected");
         }
     }
 
@@ -771,7 +815,7 @@ impl App {
     fn open_key_picker(&mut self) {
         let keys = self.collect_key_candidates();
         if keys.is_empty() {
-            self.status = "No known keys yet".to_string();
+            self.set_status("No known keys yet");
             return;
         }
         self.key_picker = Some(KeyPickerState { keys, selected: 0 });
@@ -783,6 +827,9 @@ impl App {
                 .transfer
                 .as_ref()
                 .map(|t| (t.direction, t.step));
+            let only_dirs = transfer_mode
+                .map(|m| m.0 == TransferDirection::Download && m.1 == TransferStep::PickTarget)
+                .unwrap_or(false);
             match key.code {
                 KeyCode::Esc => {
                     self.file_picker = None;
@@ -794,7 +841,7 @@ impl App {
                     if let Some((direction, step)) = transfer_mode {
                         match (direction, step) {
                             (TransferDirection::Upload, TransferStep::PickSource) => {
-                                self.status = "Already at source selection".to_string();
+                                self.set_status("Already at source selection");
                             }
                             (TransferDirection::Download, TransferStep::PickTarget) => {
                                 let start = self
@@ -841,8 +888,18 @@ impl App {
                 KeyCode::Enter => {
                     if let Some(entry) = picker.entries.get(picker.selected).cloned() {
                         if entry.is_dir {
+                            if only_dirs {
+                                let subdirs = read_dir_entries_filtered(&entry.path, true)?;
+                                if subdirs.is_empty() {
+                                    self.notice = Some(Notice {
+                                        title: "No subfolders".to_string(),
+                                        message: "This folder has no subfolders. To select it as the target, press S.".to_string(),
+                                    });
+                                    return Ok(false);
+                                }
+                            }
                             picker.cwd = entry.path;
-                            picker.entries = read_dir_entries_filtered(&picker.cwd, transfer_mode.map(|m| m.0 == TransferDirection::Download && m.1 == TransferStep::PickTarget).unwrap_or(false))?;
+                            picker.entries = read_dir_entries_filtered(&picker.cwd, only_dirs)?;
                             picker.selected = 0;
                         } else {
                             match transfer_mode {
@@ -893,6 +950,7 @@ impl App {
             .transfer
             .as_ref()
             .map(|t| (t.direction, t.step));
+        let only_dirs = picker.only_dirs;
         match key.code {
             KeyCode::Esc => {
                 self.remote_picker = None;
@@ -917,7 +975,7 @@ impl App {
                             return Ok(false);
                         }
                         (TransferDirection::Download, TransferStep::PickSource) => {
-                            self.status = "Already at source selection".to_string();
+                            self.set_status("Already at source selection");
                             return Ok(false);
                         }
                         _ => {}
@@ -953,6 +1011,33 @@ impl App {
             KeyCode::Enter => {
                 if let Some(entry) = picker.entries.get(picker.selected).cloned() {
                     if entry.is_dir {
+                        if only_dirs {
+                            let Some(conn) = self.selected_connected_connection() else {
+                                self.set_status("Selected connection is not connected");
+                                self.remote_picker = Some(picker);
+                                return Ok(false);
+                            };
+                            let open_conn = match self
+                                .open_connections
+                                .iter()
+                                .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
+                            {
+                                Some(conn) => conn,
+                                None => {
+                                    self.set_status("Selected connection is not connected");
+                                    self.remote_picker = Some(picker);
+                                    return Ok(false);
+                                }
+                            };
+                            if !crate::ssh::remote_has_subdirs(&open_conn.session, &entry.path)? {
+                                self.notice = Some(Notice {
+                                    title: "No subfolders".to_string(),
+                                    message: "This folder has no subfolders. To select it as the target, press S.".to_string(),
+                                });
+                                self.remote_picker = Some(picker);
+                                return Ok(false);
+                            }
+                        }
                         let new_cwd = entry.path;
                         picker.cwd = new_cwd.clone();
                         picker.entries.clear();
@@ -1001,23 +1086,19 @@ impl App {
     }
 
     fn handle_transfer_confirm(&mut self, key: KeyEvent) -> Result<bool> {
+        if matches!(
+            self.transfer.as_ref().map(|t| t.step),
+            Some(TransferStep::Transferring)
+        ) {
+            return Ok(false);
+        }
         match key.code {
             KeyCode::Esc => {
                 self.transfer = None;
-                self.status = "Cancelled".to_string();
+                self.set_status("Cancelled");
             }
             KeyCode::Enter => {
-                if let Err(err) = self.execute_transfer() {
-                    self.notice = Some(Notice {
-                        title: "Transfer failed".to_string(),
-                        message: err.to_string(),
-                    });
-                } else {
-                    self.notice = Some(Notice {
-                        title: "Transfer complete".to_string(),
-                        message: "Transfer finished successfully".to_string(),
-                    });
-                }
+                self.start_transfer_job();
             }
             KeyCode::Char('b') => {
                 if let Some(transfer) = &mut self.transfer {
@@ -1047,6 +1128,62 @@ impl App {
             _ => {}
         }
         Ok(false)
+    }
+
+    fn start_transfer_job(&mut self) {
+        let Some(transfer) = self.transfer.take() else {
+            return;
+        };
+        let Some(config) = self.selected_connected_connection() else {
+            self.set_status("Selected connection is not connected");
+            return;
+        };
+        let (tx, rx) = mpsc::channel();
+        let transfer_clone = transfer.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<()> {
+                let session = connect_ssh(&config)?;
+                match transfer_clone.direction {
+                    TransferDirection::Upload => {
+                        let Some(source) = transfer_clone.source_path else {
+                            anyhow::bail!("Missing source");
+                        };
+                        let Some(target_dir) = transfer_clone.target_dir else {
+                            anyhow::bail!("Missing target");
+                        };
+                        crate::ssh::transfer_path_with_progress(
+                            &session,
+                            &source,
+                            &target_dir,
+                            transfer_clone.source_is_dir,
+                            &tx,
+                        )?;
+                    }
+                    TransferDirection::Download => {
+                        let Some(source) = transfer_clone.source_remote else {
+                            anyhow::bail!("Missing source");
+                        };
+                        let Some(target_dir) = transfer_clone.target_local_dir else {
+                            anyhow::bail!("Missing target");
+                        };
+                        crate::ssh::download_path_with_progress(
+                            &session,
+                            &source,
+                            &target_dir,
+                            transfer_clone.source_is_dir,
+                            &tx,
+                        )?;
+                    }
+                }
+                Ok(())
+            })();
+            let _ = tx.send(TransferUpdate::Done(result.map_err(|err| err.to_string())));
+        });
+        let mut transfer = transfer;
+        transfer.step = TransferStep::Transferring;
+        transfer.progress_bytes = 0;
+        self.transfer = Some(transfer);
+        self.transfer_progress = Some(rx);
     }
 
     fn handle_key_picker_key(&mut self, key: KeyEvent) -> Result<bool> {
@@ -1098,7 +1235,7 @@ impl App {
         }
         if should_save {
             if let Err(err) = self.save_store() {
-                self.status = format!("Failed to save history: {err}");
+                self.set_status(format!("Failed to save history: {err}"));
             }
             self.sort_connections_by_recent(Some(crate::model::connection_key(config)));
         }
@@ -1223,6 +1360,7 @@ impl App {
             target_dir: None,
             target_local_dir: None,
             size_bytes: None,
+            progress_bytes: 0,
         });
         if let Ok(start_dir) = resolve_picker_start("") {
             if let Ok(entries) = read_dir_entries_filtered(&start_dir, false) {
@@ -1233,7 +1371,7 @@ impl App {
                 });
             }
         }
-        self.status = format!("Select source for {}", conn.label());
+        self.set_status(format!("Select source for {}", conn.label()));
     }
 
     fn start_upload(&mut self, conn: ConnectionConfig) {
@@ -1250,11 +1388,12 @@ impl App {
             target_dir: None,
             target_local_dir: None,
             size_bytes: None,
+            progress_bytes: 0,
         });
         if let Err(err) = self.open_remote_picker() {
-            self.status = format!("Failed to open remote picker: {err}");
+            self.set_status(format!("Failed to open remote picker: {err}"));
         }
-        self.status = format!("Select remote source for {}", conn.label());
+        self.set_status(format!("Select remote source for {}", conn.label()));
     }
 
     fn select_source(&mut self, path: PathBuf, is_dir: bool) {
@@ -1262,17 +1401,16 @@ impl App {
             transfer.source_path = Some(path);
             transfer.source_is_dir = is_dir;
             transfer.step = TransferStep::PickTarget;
-            transfer.size_bytes = compute_local_size(&transfer.source_path, is_dir).ok();
+            transfer.size_bytes = None;
         }
     }
 
     fn select_remote_source(&mut self, path: String, is_dir: bool) {
-        let size = self.compute_remote_size(Some(&path), is_dir).ok();
         if let Some(transfer) = &mut self.transfer {
             transfer.source_remote = Some(path);
             transfer.source_is_dir = is_dir;
             transfer.step = TransferStep::PickTarget;
-            transfer.size_bytes = size;
+            transfer.size_bytes = None;
         }
     }
 
@@ -1321,13 +1459,30 @@ impl App {
         if let Some(transfer) = &mut self.transfer {
             transfer.target_dir = Some(path);
             transfer.step = TransferStep::Confirm;
+            if transfer.size_bytes.is_none() {
+                transfer.size_bytes =
+                    compute_local_size(&transfer.source_path, transfer.source_is_dir).ok();
+            }
         }
     }
 
     fn select_target_local_dir(&mut self, path: PathBuf) {
+        let size = if let Some(transfer) = &self.transfer {
+            if transfer.size_bytes.is_none() {
+                self.compute_remote_size(transfer.source_remote.as_ref(), transfer.source_is_dir)
+                    .ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         if let Some(transfer) = &mut self.transfer {
             transfer.target_local_dir = Some(path);
             transfer.step = TransferStep::Confirm;
+            if transfer.size_bytes.is_none() {
+                transfer.size_bytes = size;
+            }
         }
     }
 
@@ -1373,7 +1528,7 @@ impl App {
                 )?;
             }
         }
-        self.status = "Transfer completed".to_string();
+        self.set_status("Transfer completed");
         Ok(())
     }
 
@@ -1457,6 +1612,43 @@ impl App {
         }
     }
 
+    pub(crate) fn poll_transfer_progress(&mut self) {
+        let Some(rx) = self.transfer_progress.take() else {
+            return;
+        };
+        let mut done = false;
+        while let Ok(update) = rx.try_recv() {
+            match update {
+                TransferUpdate::Bytes(amount) => {
+                    if let Some(transfer) = &mut self.transfer {
+                        transfer.progress_bytes = transfer.progress_bytes.saturating_add(amount);
+                    }
+                }
+                TransferUpdate::Done(result) => {
+                    match result {
+                        Ok(()) => {
+                            self.notice = Some(Notice {
+                                title: "Transfer complete".to_string(),
+                                message: "Transfer finished successfully".to_string(),
+                            });
+                        }
+                        Err(err) => {
+                            self.notice = Some(Notice {
+                                title: "Transfer failed".to_string(),
+                                message: err,
+                            });
+                        }
+                    }
+                    self.transfer = None;
+                    done = true;
+                }
+            }
+        }
+        if !done {
+            self.transfer_progress = Some(rx);
+        }
+    }
+
     fn collect_key_candidates(&self) -> Vec<crate::model::KeyCandidate> {
         let mut candidates = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -1508,6 +1700,11 @@ fn resolve_picker_start(current: &str) -> Result<PathBuf> {
         return Ok(home);
     }
     std::env::current_dir().context("current dir")
+}
+
+fn load_last_log(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    content.lines().rev().find(|line| !line.trim().is_empty()).map(|line| line.to_string())
 }
 
 fn read_dir_entries_filtered(dir: &Path, only_dirs: bool) -> Result<Vec<FileEntry>> {

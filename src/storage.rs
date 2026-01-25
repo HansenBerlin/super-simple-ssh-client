@@ -27,6 +27,17 @@ pub(crate) fn config_path() -> Result<PathBuf> {
     Ok(fallback)
 }
 
+pub(crate) fn log_path() -> Result<PathBuf> {
+    if let Some(mut dir) = dirs::config_dir() {
+        dir.push("ssh-client");
+        dir.push("ssh-client.log");
+        return Ok(dir);
+    }
+    let mut fallback = std::env::current_dir().context("current dir")?;
+    fallback.push("ssh-client.log");
+    Ok(fallback)
+}
+
 pub(crate) fn load_or_init_store(
     path: &Path,
 ) -> Result<(MasterConfig, Vec<u8>, Vec<ConnectionConfig>)> {

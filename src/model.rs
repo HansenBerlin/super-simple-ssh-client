@@ -224,6 +224,7 @@ pub(crate) enum TransferStep {
     PickSource,
     PickTarget,
     Confirm,
+    Transferring,
 }
 
 #[derive(Debug, Clone)]
@@ -236,6 +237,7 @@ pub(crate) struct TransferState {
     pub(crate) target_dir: Option<String>,
     pub(crate) target_local_dir: Option<PathBuf>,
     pub(crate) size_bytes: Option<u64>,
+    pub(crate) progress_bytes: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -248,6 +250,11 @@ pub(crate) struct KeyPickerState {
 pub(crate) enum TransferDirection {
     Upload,
     Download,
+}
+
+pub(crate) enum TransferUpdate {
+    Bytes(u64),
+    Done(Result<(), String>),
 }
 
 #[derive(Debug, Clone)]
