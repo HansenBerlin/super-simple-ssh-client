@@ -1,4 +1,6 @@
+use std::fs::File;
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -132,6 +134,66 @@ pub(crate) fn run_ssh_terminal(session: &Session) -> Result<()> {
 
     session.set_blocking(true);
     channel.close().ok();
+    Ok(())
+}
+
+pub(crate) fn transfer_path(
+    session: &Session,
+    source: &Path,
+    target: &str,
+    source_is_dir: bool,
+    target_is_dir: bool,
+) -> Result<()> {
+    let sftp = session.sftp().context("open sftp")?;
+    if source_is_dir {
+        let remote_dir = if target_is_dir {
+            target.trim_end_matches('/').to_string()
+        } else {
+            target.to_string()
+        };
+        upload_dir(&sftp, source, &remote_dir)?;
+    } else {
+        let remote_path = if target_is_dir {
+            let name = source
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .ok_or_else(|| anyhow::anyhow!("missing source filename"))?;
+            format!("{}/{}", target.trim_end_matches('/'), name)
+        } else {
+            target.to_string()
+        };
+        upload_file(&sftp, source, &remote_path)?;
+    }
+    Ok(())
+}
+
+fn upload_dir(sftp: &ssh2::Sftp, local_dir: &Path, remote_dir: &str) -> Result<()> {
+    let _ = sftp.mkdir(Path::new(remote_dir), 0o755);
+    for entry in std::fs::read_dir(local_dir).context("read local dir")? {
+        let entry = entry.context("read local dir entry")?;
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let remote_path = format!("{remote_dir}/{name}");
+        if path.is_dir() {
+            upload_dir(sftp, &path, &remote_path)?;
+        } else {
+            upload_file(sftp, &path, &remote_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn upload_file(sftp: &ssh2::Sftp, local_path: &Path, remote_path: &str) -> Result<()> {
+    let mut local = File::open(local_path).context("open local file")?;
+    let mut remote = sftp
+        .open_mode(
+            Path::new(remote_path),
+            ssh2::OpenFlags::CREATE | ssh2::OpenFlags::TRUNCATE | ssh2::OpenFlags::WRITE,
+            0o644,
+            ssh2::OpenType::File,
+        )
+        .context("open remote file")?;
+    io::copy(&mut local, &mut remote).context("copy file")?;
     Ok(())
 }
 

@@ -10,7 +10,7 @@ use crate::app::App;
 use crate::model::{AuthConfig, AuthKind, Field, MasterField, Mode};
 
 const HELP_TEXT: &str =
-    "n = new | e = edit | c = connect | d = disconnect | t = terminal | m = master pw | x = delete | h = toggle header | q = quit";
+    "n = new | e = edit | c = connect | d = disconnect | t = terminal | f = transfer | m = master pw | x = delete | h = toggle header | q = quit";
 const LABEL_WIDTH: usize = 9;
 
 pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
@@ -55,6 +55,12 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
         if app.try_result.is_some() {
             draw_try_result_modal(frame, app);
         }
+    }
+    if app.remote_picker.is_some() {
+        draw_remote_picker_modal(frame, app);
+    }
+    if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::Confirm) {
+        draw_transfer_confirm_modal(frame, app);
     }
     if app.mode == Mode::ChangeMasterPassword {
         draw_master_password_modal(frame, app);
@@ -475,7 +481,12 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
         &mut list_state(picker.selected, picker.entries.len()),
     );
 
-    let footer = Paragraph::new("Enter to open/select, Backspace to up, Esc to cancel")
+    let footer_text = if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickSource) {
+        "Enter to open file, S to select folder, Backspace to up, Esc to cancel"
+    } else {
+        "Enter to open/select, Backspace to up, Esc to cancel"
+    };
+    let footer = Paragraph::new(footer_text)
         .style(Style::default().fg(Color::Gray));
     frame.render_widget(footer, layout[2]);
 }
@@ -520,6 +531,108 @@ fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
         inner,
         &mut list_state(picker.selected, picker.keys.len()),
     );
+}
+
+fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
+    let picker = match &app.remote_picker {
+        Some(picker) => picker,
+        None => return,
+    };
+    let area = centered_rect(80, 70, frame.area());
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title(Line::from(Span::styled(
+            "Pick remote target",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL);
+    frame.render_widget(block, area);
+
+    let inner = Rect {
+        x: area.x + 2,
+        y: area.y + 2,
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(4),
+    };
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(3), Constraint::Length(2)].as_ref())
+        .split(inner);
+
+    let header = Paragraph::new(format!("Dir: {}", picker.cwd))
+        .style(Style::default().fg(Color::Gray));
+    frame.render_widget(header, layout[0]);
+
+    let items: Vec<ListItem> = picker
+        .entries
+        .iter()
+        .map(|entry| {
+            let prefix = if entry.is_dir { "[D]" } else { "[F]" };
+            ListItem::new(format!("{prefix} {}", entry.name))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL))
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(
+        list,
+        layout[1],
+        &mut list_state(picker.selected, picker.entries.len()),
+    );
+
+    let footer = Paragraph::new("Enter to open file, S to select folder, Backspace to up, Esc to cancel")
+        .style(Style::default().fg(Color::Gray));
+    frame.render_widget(footer, layout[2]);
+}
+
+fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
+    let transfer = match &app.transfer {
+        Some(transfer) => transfer,
+        None => return,
+    };
+    let area = centered_rect(70, 40, frame.area());
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title(Line::from(Span::styled(
+            "Confirm transfer",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL);
+    frame.render_widget(block, area);
+
+    let inner = Rect {
+        x: area.x + 2,
+        y: area.y + 2,
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(4),
+    };
+
+    let source = transfer
+        .source_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "-".to_string());
+    let target = transfer
+        .target_path
+        .clone()
+        .unwrap_or_else(|| "-".to_string());
+
+    let lines = vec![
+        Line::from(format!("Source: {source}")),
+        Line::from(format!("Target: {target}")),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to transfer, "),
+            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to cancel"),
+        ]),
+    ];
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    frame.render_widget(paragraph, inner);
 }
 
 fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {

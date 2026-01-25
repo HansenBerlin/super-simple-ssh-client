@@ -8,6 +8,7 @@ use base64::engine::general_purpose::STANDARD as Base64;
 use base64::Engine;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -15,7 +16,8 @@ use ratatui::backend::CrosstermBackend;
 use crate::model::{
     AppAction, AuthConfig, AuthKind, ConnectionConfig, Field, FileEntry, FilePickerState,
     HistoryEntry, HistoryState, KeyPickerState, MasterField, MasterPasswordState, Mode,
-    NewConnectionState, Notice, OpenConnection, TryResult,
+    NewConnectionState, Notice, OpenConnection, RemoteEntry, RemotePickerState, TransferState,
+    TransferStep, TryResult,
 };
 use crate::ssh::{connect_ssh, expand_tilde, run_ssh_terminal};
 use crate::storage::{
@@ -47,6 +49,8 @@ pub(crate) struct App {
     pub(crate) show_header: bool,
     pub(crate) history_page: usize,
     pub(crate) details_height: u16,
+    pub(crate) transfer: Option<TransferState>,
+    pub(crate) remote_picker: Option<RemotePickerState>,
 }
 
 impl App {
@@ -78,6 +82,8 @@ impl App {
             show_header: true,
             history_page: 0,
             details_height: 0,
+            transfer: None,
+            remote_picker: None,
         })
     }
 
@@ -87,6 +93,17 @@ impl App {
                 self.notice = None;
             }
             return Ok(false);
+        }
+        if self.transfer.is_some() {
+            if self.file_picker.is_some() {
+                return self.handle_file_picker_key(key);
+            }
+            if self.remote_picker.is_some() {
+                return self.handle_remote_picker_key(key);
+            }
+            if matches!(self.transfer.as_ref().map(|t| t.step), Some(TransferStep::Confirm)) {
+                return self.handle_transfer_confirm(key);
+            }
         }
         match self.mode {
             Mode::Normal => self.handle_normal_key(key),
@@ -100,21 +117,31 @@ impl App {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     ) -> Result<()> {
-        let session = match self.open_connections.get(self.selected_tab) {
-            Some(conn) => &conn.session,
+        let Some(conn) = self.selected_connected_connection() else {
+            self.status = "Selected connection is not connected".to_string();
+            return Ok(());
+        };
+        let open_conn = match self
+            .open_connections
+            .iter()
+            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
+        {
+            Some(conn) => conn,
             None => {
-                self.status = "No active connection".to_string();
+                self.status = "Selected connection is not connected".to_string();
                 return Ok(());
             }
         };
 
+        execute!(terminal.backend_mut(), DisableMouseCapture).ok();
         disable_raw_mode().ok();
         execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
 
-        let result = run_ssh_terminal(session);
+        let result = run_ssh_terminal(&open_conn.session);
 
         execute!(terminal.backend_mut(), EnterAlternateScreen).ok();
         enable_raw_mode().ok();
+        execute!(terminal.backend_mut(), EnableMouseCapture).ok();
         terminal.clear().ok();
 
         match result {
@@ -165,6 +192,13 @@ impl App {
                     self.status = "No open connections".to_string();
                 } else {
                     self.pending_action = Some(AppAction::OpenTerminal);
+                }
+            }
+            KeyCode::Char('f') => {
+                if let Some(conn) = self.selected_connected_connection() {
+                    self.start_transfer(conn);
+                } else {
+                    self.status = "Selected connection is not connected".to_string();
                 }
             }
             KeyCode::Char('m') => {
@@ -610,6 +644,9 @@ impl App {
             match key.code {
                 KeyCode::Esc => {
                     self.file_picker = None;
+                    if self.transfer.is_some() {
+                        self.transfer = None;
+                    }
                 }
                 KeyCode::Up => {
                     if picker.selected > 0 {
@@ -635,14 +672,125 @@ impl App {
                             picker.entries = read_dir_entries(&picker.cwd)?;
                             picker.selected = 0;
                         } else {
-                            self.new_connection.key_path =
-                                entry.path.to_string_lossy().into_owned();
-                            self.file_picker = None;
+                            if self.transfer.as_ref().is_some_and(|t| t.step == TransferStep::PickSource) {
+                                self.select_source(entry.path, false);
+                                self.file_picker = None;
+                                self.open_remote_picker()?;
+                            } else {
+                                self.new_connection.key_path =
+                                    entry.path.to_string_lossy().into_owned();
+                                self.file_picker = None;
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('s') => {
+                    if self.transfer.as_ref().is_some_and(|t| t.step == TransferStep::PickSource) {
+                        if let Some(entry) = picker.entries.get(picker.selected).cloned() {
+                            if entry.is_dir {
+                                self.select_source(entry.path, true);
+                                self.file_picker = None;
+                                self.open_remote_picker()?;
+                            }
                         }
                     }
                 }
                 _ => {}
             }
+        }
+        Ok(false)
+    }
+
+    fn handle_remote_picker_key(&mut self, key: KeyEvent) -> Result<bool> {
+        let Some(mut picker) = self.remote_picker.take() else {
+            return Ok(false);
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.remote_picker = None;
+                self.transfer = None;
+                return Ok(false);
+            }
+            KeyCode::Up => {
+                if picker.selected > 0 {
+                    picker.selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if picker.selected + 1 < picker.entries.len() {
+                    picker.selected += 1;
+                }
+            }
+            KeyCode::Backspace => {
+                if picker.cwd != "/" {
+                    let new_cwd = picker
+                        .cwd
+                        .trim_end_matches('/')
+                        .rsplit_once('/')
+                        .map(|(base, _)| if base.is_empty() { "/".to_string() } else { base.to_string() })
+                        .unwrap_or_else(|| "/".to_string());
+                    let entries = self.read_remote_entries(&new_cwd)?;
+                    picker.cwd = new_cwd;
+                    picker.entries = entries;
+                    picker.selected = 0;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(entry) = picker.entries.get(picker.selected).cloned() {
+                    if entry.is_dir {
+                        let new_cwd = entry.path;
+                        let entries = self.read_remote_entries(&new_cwd)?;
+                        picker.cwd = new_cwd;
+                        picker.entries = entries;
+                        picker.selected = 0;
+                    } else {
+                        self.select_target(entry.path, false);
+                        self.transfer = self.transfer.take().map(|mut t| {
+                            t.step = TransferStep::Confirm;
+                            t
+                        });
+                        return Ok(false);
+                    }
+                }
+            }
+            KeyCode::Char('s') => {
+                if let Some(entry) = picker.entries.get(picker.selected).cloned() {
+                    if entry.is_dir {
+                        self.select_target(entry.path, true);
+                        self.transfer = self.transfer.take().map(|mut t| {
+                            t.step = TransferStep::Confirm;
+                            t
+                        });
+                        return Ok(false);
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.remote_picker = Some(picker);
+        Ok(false)
+    }
+
+    fn handle_transfer_confirm(&mut self, key: KeyEvent) -> Result<bool> {
+        match key.code {
+            KeyCode::Esc => {
+                self.transfer = None;
+                self.status = "Cancelled".to_string();
+            }
+            KeyCode::Enter => {
+                if let Err(err) = self.execute_transfer() {
+                    self.notice = Some(Notice {
+                        title: "Transfer failed".to_string(),
+                        message: err.to_string(),
+                    });
+                } else {
+                    self.notice = Some(Notice {
+                        title: "Transfer complete".to_string(),
+                        message: "Transfer finished successfully".to_string(),
+                    });
+                }
+            }
+            _ => {}
         }
         Ok(false)
     }
@@ -807,6 +955,130 @@ impl App {
             }
         }
         state
+    }
+
+    fn start_transfer(&mut self, conn: ConnectionConfig) {
+        self.transfer = Some(TransferState {
+            step: TransferStep::PickSource,
+            source_path: None,
+            source_is_dir: false,
+            target_path: None,
+            target_is_dir: false,
+        });
+        if let Ok(start_dir) = resolve_picker_start("") {
+            if let Ok(entries) = read_dir_entries(&start_dir) {
+                self.file_picker = Some(FilePickerState {
+                    cwd: start_dir,
+                    entries,
+                    selected: 0,
+                });
+            }
+        }
+        self.status = format!("Select source for {}", conn.label());
+    }
+
+    fn select_source(&mut self, path: PathBuf, is_dir: bool) {
+        if let Some(transfer) = &mut self.transfer {
+            transfer.source_path = Some(path);
+            transfer.source_is_dir = is_dir;
+            transfer.step = TransferStep::PickTarget;
+        }
+    }
+
+    fn open_remote_picker(&mut self) -> Result<()> {
+        let cwd = "/".to_string();
+        let entries = self.read_remote_entries(&cwd)?;
+        self.remote_picker = Some(RemotePickerState {
+            cwd,
+            entries,
+            selected: 0,
+        });
+        Ok(())
+    }
+
+    fn select_target(&mut self, path: String, is_dir: bool) {
+        if let Some(transfer) = &mut self.transfer {
+            transfer.target_path = Some(path);
+            transfer.target_is_dir = is_dir;
+            transfer.step = TransferStep::Confirm;
+        }
+    }
+
+    fn execute_transfer(&mut self) -> Result<()> {
+        let Some(transfer) = self.transfer.take() else {
+            return Ok(());
+        };
+        let Some(source) = transfer.source_path else {
+            anyhow::bail!("Missing source");
+        };
+        let Some(target) = transfer.target_path else {
+            anyhow::bail!("Missing target");
+        };
+        let Some(conn) = self.selected_connected_connection() else {
+            anyhow::bail!("Selected connection is not connected");
+        };
+        let open_conn = self
+            .open_connections
+            .iter()
+            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
+            .context("selected connection is not connected")?;
+        crate::ssh::transfer_path(
+            &open_conn.session,
+            &source,
+            &target,
+            transfer.source_is_dir,
+            transfer.target_is_dir,
+        )?;
+        self.status = "Transfer completed".to_string();
+        Ok(())
+    }
+
+    fn selected_connected_connection(&self) -> Option<ConnectionConfig> {
+        let conn = self.connections.get(self.selected_saved)?;
+        if self
+            .open_connections
+            .iter()
+            .any(|candidate| crate::model::same_identity(&candidate.config, conn))
+        {
+            Some(conn.clone())
+        } else {
+            None
+        }
+    }
+
+    fn read_remote_entries(&self, cwd: &str) -> Result<Vec<RemoteEntry>> {
+        let Some(conn) = self.selected_connected_connection() else {
+            anyhow::bail!("Selected connection is not connected");
+        };
+        let open_conn = self
+            .open_connections
+            .iter()
+            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
+            .context("selected connection is not connected")?;
+        let sftp = open_conn.session.sftp().context("open sftp")?;
+        let mut entries = Vec::new();
+        for (path, stat) in sftp.readdir(Path::new(cwd)).context("read remote dir")? {
+            let name = path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| String::from("/"));
+            if name == "." || name == ".." {
+                continue;
+            }
+            let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
+            let full = if cwd == "/" {
+                format!("/{name}")
+            } else {
+                format!("{cwd}/{name}")
+            };
+            entries.push(RemoteEntry {
+                name,
+                path: full,
+                is_dir,
+            });
+        }
+        entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
+        Ok(entries)
     }
 
     fn collect_key_candidates(&self) -> Vec<crate::model::KeyCandidate> {
