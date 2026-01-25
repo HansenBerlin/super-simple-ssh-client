@@ -66,7 +66,7 @@ impl App {
     pub(crate) fn load_with_master() -> Result<Self> {
         let config_path = config_path()?;
         let (master, master_key, connections) = load_or_init_store(&config_path)?;
-        Ok(Self {
+        let mut app = Self {
             config_path,
             master,
             master_key,
@@ -95,7 +95,9 @@ impl App {
             transfer: None,
             remote_picker: None,
             remote_fetch: None,
-        })
+        };
+        app.sort_connections_by_recent(None);
+        Ok(app)
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> Result<bool> {
@@ -392,17 +394,21 @@ impl App {
                 self.mode = Mode::Normal;
                 self.status = "Cancelled".to_string();
             }
-            KeyCode::Tab => self.advance_master_field(true),
-            KeyCode::BackTab => self.advance_master_field(false),
-            KeyCode::Enter => match self.apply_master_password_change() {
-                Ok(()) => {
-                    self.mode = Mode::Normal;
-                    self.status = "Master password updated".to_string();
+            KeyCode::Tab | KeyCode::Down => self.advance_master_field(true),
+            KeyCode::BackTab | KeyCode::Up => self.advance_master_field(false),
+            KeyCode::Enter => {
+                if self.master_change.active_field == MasterField::ActionSave {
+                    match self.apply_master_password_change() {
+                        Ok(()) => {
+                            self.mode = Mode::Normal;
+                            self.status = "Master password updated".to_string();
+                        }
+                        Err(err) => {
+                            self.status = format!("Master password not changed: {err}");
+                        }
+                    }
                 }
-                Err(err) => {
-                    self.status = format!("Master password not changed: {err}");
-                }
-            },
+            }
             KeyCode::Backspace => {
                 self.edit_master_field(EditAction::Backspace);
             }
@@ -513,6 +519,7 @@ impl App {
         self.selected_tab = self.open_connections.len().saturating_sub(1);
         self.upsert_connection(config.clone());
         self.save_store()?;
+        self.sort_connections_by_recent(Some(crate::model::connection_key(&config)));
         self.last_error.remove(&crate::model::connection_key(&config));
         self.status = format!("Connected to {}", config.label());
         Ok(())
@@ -583,7 +590,12 @@ impl App {
     }
 
     fn advance_master_field(&mut self, forward: bool) {
-        let fields = [MasterField::Current, MasterField::New, MasterField::Confirm];
+        let fields = [
+            MasterField::Current,
+            MasterField::New,
+            MasterField::Confirm,
+            MasterField::ActionSave,
+        ];
         let pos = fields
             .iter()
             .position(|field| *field == self.master_change.active_field)
@@ -603,6 +615,7 @@ impl App {
             MasterField::Current => &mut self.master_change.current,
             MasterField::New => &mut self.master_change.new_password,
             MasterField::Confirm => &mut self.master_change.confirm,
+            MasterField::ActionSave => return,
         };
         match action {
             EditAction::Insert(ch) => target.push(ch),
@@ -684,6 +697,27 @@ impl App {
         } else {
             self.status = "No saved connection selected".to_string();
             None
+        }
+    }
+
+    fn sort_connections_by_recent(&mut self, selected_key: Option<String>) {
+        self.connections.sort_by(|left, right| {
+            let left_ts = left.history.iter().map(|h| h.ts).max().unwrap_or(0);
+            let right_ts = right.history.iter().map(|h| h.ts).max().unwrap_or(0);
+            right_ts.cmp(&left_ts)
+        });
+        if let Some(key) = selected_key {
+            if let Some(index) = self
+                .connections
+                .iter()
+                .position(|conn| crate::model::connection_key(conn) == key)
+            {
+                self.selected_saved = index;
+                return;
+            }
+        }
+        if self.selected_saved >= self.connections.len() {
+            self.selected_saved = self.connections.len().saturating_sub(1);
         }
     }
 
@@ -917,6 +951,7 @@ impl App {
             if let Err(err) = self.save_store() {
                 self.status = format!("Failed to save history: {err}");
             }
+            self.sort_connections_by_recent(Some(crate::model::connection_key(config)));
         }
     }
 
@@ -1153,7 +1188,7 @@ impl App {
                         is_dir,
                     });
                 }
-                entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
+                entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
                 Ok(entries)
             })();
             let _ = tx.send(result);
@@ -1234,10 +1269,6 @@ fn read_dir_entries(dir: &Path) -> Result<Vec<FileEntry>> {
             is_dir: file_type.is_dir(),
         });
     }
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(entries)
 }

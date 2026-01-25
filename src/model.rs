@@ -134,6 +134,7 @@ pub(crate) enum MasterField {
     Current,
     New,
     Confirm,
+    ActionSave,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

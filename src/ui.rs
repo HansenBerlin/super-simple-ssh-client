@@ -529,7 +529,7 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(80, 60, frame.area());
+    let area = centered_rect(60, 90, frame.area());
     frame.render_widget(Clear, area);
     let title = if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickSource) {
         "Pick source file or folder"
@@ -548,7 +548,7 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(3), Constraint::Length(2)].as_ref())
+        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)].as_ref())
         .split(inner);
 
     let header = Paragraph::new(format!("Dir: {}", picker.cwd.display()))
@@ -562,8 +562,8 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
             .entries
             .iter()
             .map(|entry| {
-                let prefix = if entry.is_dir { "[D]" } else { "[F]" };
-                ListItem::new(format!("{prefix} {}", entry.name))
+                let suffix = if entry.is_dir { "/" } else { "" };
+                ListItem::new(format!("{}{}", entry.name, suffix))
             })
             .collect()
     };
@@ -593,7 +593,7 @@ fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(70, 50, frame.area());
+    let area = centered_rect(60, 90, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -630,7 +630,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         Some(picker) => picker,
         None => return,
     };
-    let area = centered_rect(80, 60, frame.area());
+    let area = centered_rect(70, 50, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title(Line::from(Span::styled(
@@ -644,7 +644,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
 
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(3), Constraint::Length(2)].as_ref())
+        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)].as_ref())
         .split(inner);
 
     let header = Paragraph::new(format!("Dir: {}", picker.cwd))
@@ -655,8 +655,8 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         .entries
         .iter()
         .map(|entry| {
-            let prefix = if entry.is_dir { "[D]" } else { "[F]" };
-            ListItem::new(format!("{prefix} {}", entry.name))
+            let suffix = if entry.is_dir { "/" } else { "" };
+            ListItem::new(format!("{}{}", entry.name, suffix))
         })
         .collect();
 
@@ -710,10 +710,23 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| "-".to_string());
-    let target = transfer
+    let target_dir = transfer
         .target_dir
         .clone()
         .unwrap_or_else(|| "-".to_string());
+    let target_name = transfer
+        .source_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| String::from("item"));
+    let target = if target_dir == "-" {
+        target_dir.clone()
+    } else if target_dir == "/" {
+        format!("/{target_name}")
+    } else {
+        format!("{target_dir}/{target_name}")
+    };
 
     let lines = vec![
         Line::from(format!("Source: {source}")),
@@ -731,7 +744,7 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
-    let height = modal_height(4, 0);
+    let height = modal_height(6, 1);
     let area = centered_rect_by_height(60, height, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
@@ -743,48 +756,72 @@ fn draw_master_password_modal(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(block, area);
 
     let inner = padded_rect(area, 1);
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)].as_ref())
+        .split(inner);
 
-    let value_width = inner
+    let value_width = layout[0]
         .width
         .saturating_sub((2 + LABEL_WIDTH as u16 + 2) as u16) as usize;
-    let lines = vec![
-        field_line(
-            "Current",
-            &app.master_change.current,
-            app.master_change.active_field == MasterField::Current,
-            true,
-            LABEL_WIDTH,
-            value_width,
-        ),
-        field_line(
-            "New",
-            &app.master_change.new_password,
-            app.master_change.active_field == MasterField::New,
-            true,
-            LABEL_WIDTH,
-            value_width,
-        ),
-        field_line(
-            "Confirm",
-            &app.master_change.confirm,
-            app.master_change.active_field == MasterField::Confirm,
-            true,
-            LABEL_WIDTH,
-            value_width,
-        ),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to move, "),
-            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to save, "),
-            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to cancel"),
-        ]),
-    ];
+    let mut lines = Vec::new();
+    let current_row = Some(0usize);
+    let new_row = Some(1usize);
+    let confirm_row = Some(2usize);
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, inner);
+    lines.push(field_line(
+        "Current",
+        &app.master_change.current,
+        app.master_change.active_field == MasterField::Current,
+        true,
+        LABEL_WIDTH,
+        value_width,
+    ));
+    lines.push(field_line(
+        "New",
+        &app.master_change.new_password,
+        app.master_change.active_field == MasterField::New,
+        true,
+        LABEL_WIDTH,
+        value_width,
+    ));
+    lines.push(field_line(
+        "Confirm",
+        &app.master_change.confirm,
+        app.master_change.active_field == MasterField::Confirm,
+        true,
+        LABEL_WIDTH,
+        value_width,
+    ));
+    lines.push(Line::from(""));
+    lines.push(action_line(
+        "Save master password",
+        app.master_change.active_field == MasterField::ActionSave,
+    ));
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, layout[0]);
+    render_master_cursor(
+        frame,
+        app,
+        layout[0],
+        current_row,
+        new_row,
+        confirm_row,
+    );
+
+    let footer = Paragraph::new(Line::from(vec![
+        Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" or "),
+        Span::styled("Up/Down", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" to move, "),
+        Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" to select, "),
+        Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(" to cancel"),
+    ]))
+    .style(Style::default().fg(Color::Gray));
+    frame.render_widget(footer, layout[1]);
 }
 
 fn draw_confirm_delete_modal(frame: &mut Frame<'_>, app: &App) {
@@ -1002,6 +1039,33 @@ fn render_input_cursor(
     let label_len = LABEL_WIDTH as u16 + 2;
     let cursor_x = area.x + indicator_len + label_len + col as u16;
     let cursor_y = area.y + visible_row as u16;
+    frame.set_cursor_position((cursor_x, cursor_y));
+}
+
+fn render_master_cursor(
+    frame: &mut Frame<'_>,
+    app: &App,
+    area: Rect,
+    current_row: Option<usize>,
+    new_row: Option<usize>,
+    confirm_row: Option<usize>,
+) {
+    let (row, col) = match app.master_change.active_field {
+        MasterField::Current => (current_row, app.master_change.current.chars().count()),
+        MasterField::New => (new_row, app.master_change.new_password.chars().count()),
+        MasterField::Confirm => (confirm_row, app.master_change.confirm.chars().count()),
+        MasterField::ActionSave => return,
+    };
+    let Some(row) = row else {
+        return;
+    };
+    if row >= area.height as usize {
+        return;
+    }
+    let indicator_len = 2u16;
+    let label_len = LABEL_WIDTH as u16 + 2;
+    let cursor_x = area.x + indicator_len + label_len + col as u16;
+    let cursor_y = area.y + row as u16;
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
