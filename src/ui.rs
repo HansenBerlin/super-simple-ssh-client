@@ -99,7 +99,7 @@ fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
                     Style::default()
                 };
                 let prefix = if connected.contains(&key) {
-                    "C "
+                    "  "
                 } else if app.last_error.contains_key(&key) {
                     "! "
                 } else {
@@ -119,7 +119,11 @@ fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
             header_style,
         ))).borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol(">> ");
+        .highlight_symbol(">");
+    let list = list.highlight_symbol(Span::styled(
+        ">",
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+    ));
 
     let mut state = ratatui::widgets::ListState::default();
     if app.connections.is_empty() {
@@ -346,10 +350,6 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
             LABEL_WIDTH,
         ));
         row_idx += 1;
-        lines.push(Line::from(Span::styled(
-            "F2 to browse for key file | F3 to pick from recent keys",
-            Style::default().fg(Color::Gray),
-        )));
         row_idx += 1;
     }
     if matches!(
@@ -400,7 +400,8 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         pass_row,
     );
 
-    let footer = Paragraph::new(Line::from(vec![
+    let mut footer_lines = Vec::new();
+    footer_lines.push(Line::from(vec![
         Span::styled("Tab", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" or "),
         Span::styled("Up/Down", Style::default().add_modifier(Modifier::BOLD)),
@@ -409,8 +410,14 @@ fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         Span::raw(" to select, "),
         Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to cancel"),
-    ]))
-    .style(Style::default().fg(Color::Gray));
+    ]));
+    if app.new_connection.auth_kind == AuthKind::PrivateKeyWithPassword {
+        footer_lines.push(Line::from(Span::styled(
+            "F2 to browse for key file | F3 to pick from recent keys",
+            Style::default().fg(Color::Gray),
+        )));
+    }
+    let footer = Paragraph::new(footer_lines).style(Style::default().fg(Color::Gray));
     frame.render_widget(footer, layout[1]);
 }
 
@@ -704,10 +711,14 @@ fn field_line(
     } else {
         value.to_string()
     };
-    let indicator = if active { ">" } else { " " };
+    let indicator = "> ";
+    let indicator_style = if active {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
     let spans = vec![
-        Span::styled(indicator, Style::default().fg(Color::Yellow)),
-        Span::raw(" "),
+        Span::styled(indicator, indicator_style),
         Span::styled(
             format!("{label:<label_width$}: "),
             Style::default().add_modifier(Modifier::BOLD),
@@ -718,10 +729,14 @@ fn field_line(
 }
 
 fn action_line(label: &str, active: bool) -> Line<'static> {
-    let indicator = if active { ">" } else { " " };
+    let indicator = "> ";
+    let indicator_style = if active {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
     let spans = vec![
-        Span::styled(indicator, Style::default().fg(Color::Yellow)),
-        Span::raw(" "),
+        Span::styled(indicator, indicator_style),
         Span::styled(format!("{label}"), Style::default().add_modifier(Modifier::BOLD)),
     ];
     Line::from(spans)
