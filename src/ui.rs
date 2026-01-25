@@ -533,25 +533,38 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
     };
     let area = centered_rect(TRANSFER_PICKER_WIDTH, TRANSFER_PICKER_HEIGHT, frame.area());
     frame.render_widget(Clear, area);
-    let title = if let Some(transfer) = &app.transfer {
+    let (title, border_style, footer_text) = if let Some(transfer) = &app.transfer {
         match (transfer.direction, transfer.step) {
-            (crate::model::TransferDirection::Upload, crate::model::TransferStep::PickSource) => {
-                "Pick source file or folder"
-            }
-            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickTarget) => {
-                "Pick target folder"
-            }
-            _ => "Pick key file",
+            (crate::model::TransferDirection::Upload, crate::model::TransferStep::PickSource) => (
+                "Pick file or folder on THIS host to upload",
+                Style::default().fg(Color::White),
+                "Enter to open, S to select folder, Backspace to up, Esc to cancel",
+            ),
+            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickTarget) => (
+                "Pick target folder",
+                Style::default().fg(Color::White),
+                "Enter to open, S to select folder, B to go back to source, Backspace to up, Esc to cancel",
+            ),
+            _ => (
+                "Pick key file",
+                Style::default(),
+                "Enter to open/select, Backspace to up, Esc to cancel",
+            ),
         }
     } else {
-        "Pick key file"
+        (
+            "Pick key file",
+            Style::default(),
+            "Enter to open/select, Backspace to up, Esc to cancel",
+        )
     };
     let block = Block::default()
         .title(Line::from(Span::styled(
             title,
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            border_style.add_modifier(Modifier::BOLD),
         )))
-        .borders(Borders::ALL);
+        .borders(Borders::ALL)
+        .border_style(border_style);
     frame.render_widget(block, area);
 
     let inner = padded_rect(area, 1);
@@ -581,20 +594,13 @@ fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol(Span::styled(">> ", Style::default().fg(Color::White)));
+        .highlight_symbol(Span::styled("> ", Style::default().fg(Color::White)));
     frame.render_stateful_widget(
         list,
         layout[1],
         &mut list_state(picker.selected, picker.entries.len()),
     );
 
-    let footer_text = if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickSource) {
-        "Enter to open, S to select folder, Backspace to up, Esc to cancel"
-    } else if app.transfer.as_ref().is_some_and(|t| t.step == crate::model::TransferStep::PickTarget) {
-        "Enter to open, S to select folder, Backspace to up, Esc to cancel"
-    } else {
-        "Enter to open/select, Backspace to up, Esc to cancel"
-    };
     let footer = Paragraph::new(footer_text)
         .style(Style::default().fg(Color::Gray));
     frame.render_widget(footer, layout[2]);
@@ -629,7 +635,7 @@ fn draw_key_picker_modal(frame: &mut Frame<'_>, app: &App) {
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL))
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol(Span::styled(">> ", Style::default().fg(Color::White)));
+        .highlight_symbol(Span::styled("> ", Style::default().fg(Color::White)));
     frame.render_stateful_widget(
         list,
         inner,
@@ -644,22 +650,38 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
     };
     let area = centered_rect(TRANSFER_PICKER_WIDTH, TRANSFER_PICKER_HEIGHT, frame.area());
     frame.render_widget(Clear, area);
-    let title = if let Some(transfer) = &app.transfer {
+    let (title, border_style, footer_text) = if let Some(transfer) = &app.transfer {
         match (transfer.direction, transfer.step) {
-            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickSource) => {
-                "Pick remote source"
-            }
-            _ => "Pick remote target",
+            (crate::model::TransferDirection::Download, crate::model::TransferStep::PickSource) => (
+                "Pick remote source",
+                Style::default().fg(Color::Green),
+                "Enter to open, S to select folder, Backspace to up, Esc to cancel",
+            ),
+            (crate::model::TransferDirection::Upload, crate::model::TransferStep::PickTarget) => (
+                "Pick where to save the file or folder on the REMOTE host",
+                Style::default().fg(Color::Green),
+                "Enter to open, S to select folder, B to go back to source, Backspace to up, Esc to cancel",
+            ),
+            _ => (
+                "Pick remote target",
+                Style::default(),
+                "Enter to open, S to select folder, Backspace to up, Esc to cancel",
+            ),
         }
     } else {
-        "Pick remote target"
+        (
+            "Pick remote target",
+            Style::default(),
+            "Enter to open, S to select folder, Backspace to up, Esc to cancel",
+        )
     };
     let block = Block::default()
         .title(Line::from(Span::styled(
             title,
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            border_style.add_modifier(Modifier::BOLD),
         )))
-        .borders(Borders::ALL);
+        .borders(Borders::ALL)
+        .border_style(border_style);
     frame.render_widget(block, area);
 
     let inner = padded_rect(area, 1);
@@ -696,7 +718,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-            .highlight_symbol(Span::styled(">> ", Style::default().fg(Color::White)));
+            .highlight_symbol(Span::styled("> ", Style::default().fg(Color::White)));
         frame.render_stateful_widget(
             list,
             layout[1],
@@ -704,7 +726,7 @@ fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         );
     }
 
-    let footer = Paragraph::new("Enter to open, S to select folder, Backspace to up, Esc to cancel")
+    let footer = Paragraph::new(footer_text)
         .style(Style::default().fg(Color::Gray));
     frame.render_widget(footer, layout[2]);
 }
@@ -717,12 +739,23 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
     let height = modal_height(3, 1);
     let area = centered_rect_by_height(70, height, frame.area());
     frame.render_widget(Clear, area);
+    let (border_style, back_label) = match transfer.direction {
+        crate::model::TransferDirection::Upload => (
+            Style::default().fg(Color::Green),
+            "B to go back to target",
+        ),
+        crate::model::TransferDirection::Download => (
+            Style::default().fg(Color::White),
+            "B to go back to target",
+        ),
+    };
     let block = Block::default()
         .title(Line::from(Span::styled(
             "Confirm transfer",
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         )))
-        .borders(Borders::ALL);
+        .borders(Borders::ALL)
+        .border_style(border_style);
     frame.render_widget(block, area);
 
     let inner = padded_rect(area, 1);
@@ -777,14 +810,23 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
             (source, target)
         }
     };
+    let size_label = transfer
+        .size_bytes
+        .map(format_bytes)
+        .unwrap_or_else(|| "-".to_string());
 
     let lines = vec![
         Line::from(format!("Source: {source}")),
         Line::from(format!("Target: {target}")),
+        Line::from(format!("Size: {size_label}")),
         Line::from(""),
         Line::from(vec![
             Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" to transfer, "),
+            Span::styled("B", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::raw(back_label),
+            Span::raw(", "),
             Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" to cancel"),
         ]),
@@ -1052,6 +1094,21 @@ fn action_line(label: &str, active: bool) -> Line<'static> {
         Span::styled(format!("{label}"), Style::default().add_modifier(Modifier::BOLD)),
     ];
     Line::from(spans)
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit = 0usize;
+    while size >= 1024.0 && unit + 1 < UNITS.len() {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", bytes, UNITS[unit])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit])
+    }
 }
 
 fn render_input_cursor(

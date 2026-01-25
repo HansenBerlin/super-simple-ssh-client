@@ -216,6 +216,7 @@ pub(crate) struct RemotePickerState {
     pub(crate) selected: usize,
     pub(crate) loading: bool,
     pub(crate) error: Option<String>,
+    pub(crate) only_dirs: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +235,7 @@ pub(crate) struct TransferState {
     pub(crate) source_is_dir: bool,
     pub(crate) target_dir: Option<String>,
     pub(crate) target_local_dir: Option<PathBuf>,
+    pub(crate) size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

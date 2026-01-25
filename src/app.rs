@@ -745,7 +745,21 @@ impl App {
 
     fn open_file_picker(&mut self) -> Result<()> {
         let start_dir = resolve_picker_start(&self.new_connection.key_path)?;
-        let entries = read_dir_entries(&start_dir)?;
+        let entries = read_dir_entries_filtered(&start_dir, false)?;
+        self.file_picker = Some(FilePickerState {
+            cwd: start_dir,
+            entries,
+            selected: 0,
+        });
+        Ok(())
+    }
+
+    fn open_local_picker(&mut self, start: Option<PathBuf>, only_dirs: bool) -> Result<()> {
+        let start_dir = match start {
+            Some(dir) => dir,
+            None => resolve_picker_start("")?,
+        };
+        let entries = read_dir_entries_filtered(&start_dir, only_dirs)?;
         self.file_picker = Some(FilePickerState {
             cwd: start_dir,
             entries,
@@ -776,6 +790,37 @@ impl App {
                         self.transfer = None;
                     }
                 }
+                KeyCode::Char('b') => {
+                    if let Some((direction, step)) = transfer_mode {
+                        match (direction, step) {
+                            (TransferDirection::Upload, TransferStep::PickSource) => {
+                                self.status = "Already at source selection".to_string();
+                            }
+                            (TransferDirection::Download, TransferStep::PickTarget) => {
+                                let start = self
+                                    .transfer
+                                    .as_ref()
+                                    .and_then(|t| t.source_remote.as_ref())
+                                    .map(|path| {
+                                        Path::new(path)
+                                            .parent()
+                                            .map(|p| p.to_string_lossy().into_owned())
+                                            .unwrap_or_else(|| "/".to_string())
+                                    });
+                                if let Some(transfer) = &mut self.transfer {
+                                    transfer.step = TransferStep::PickSource;
+                                }
+                                self.file_picker = None;
+                                if let Some(start) = start {
+                                    self.open_remote_picker_at(start, true)?;
+                                } else {
+                                    self.open_remote_picker()?;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 KeyCode::Up => {
                     if picker.selected > 0 {
                         picker.selected -= 1;
@@ -789,7 +834,7 @@ impl App {
                 KeyCode::Backspace => {
                     if let Some(parent) = picker.cwd.parent() {
                         picker.cwd = parent.to_path_buf();
-                        picker.entries = read_dir_entries(&picker.cwd)?;
+                        picker.entries = read_dir_entries_filtered(&picker.cwd, transfer_mode.map(|m| m.0 == TransferDirection::Download && m.1 == TransferStep::PickTarget).unwrap_or(false))?;
                         picker.selected = 0;
                     }
                 }
@@ -797,7 +842,7 @@ impl App {
                     if let Some(entry) = picker.entries.get(picker.selected).cloned() {
                         if entry.is_dir {
                             picker.cwd = entry.path;
-                            picker.entries = read_dir_entries(&picker.cwd)?;
+                            picker.entries = read_dir_entries_filtered(&picker.cwd, transfer_mode.map(|m| m.0 == TransferDirection::Download && m.1 == TransferStep::PickTarget).unwrap_or(false))?;
                             picker.selected = 0;
                         } else {
                             match transfer_mode {
@@ -854,6 +899,31 @@ impl App {
                 self.transfer = None;
                 return Ok(false);
             }
+            KeyCode::Char('b') => {
+                if let Some((direction, step)) = transfer_mode {
+                    match (direction, step) {
+                        (TransferDirection::Upload, TransferStep::PickTarget) => {
+                            let start = self
+                                .transfer
+                                .as_ref()
+                                .and_then(|t| t.source_path.as_ref())
+                                .and_then(|p| p.parent())
+                                .map(|p| p.to_path_buf());
+                            if let Some(transfer) = &mut self.transfer {
+                                transfer.step = TransferStep::PickSource;
+                            }
+                            self.remote_picker = None;
+                            self.open_local_picker(start, false)?;
+                            return Ok(false);
+                        }
+                        (TransferDirection::Download, TransferStep::PickSource) => {
+                            self.status = "Already at source selection".to_string();
+                            return Ok(false);
+                        }
+                        _ => {}
+                    }
+                }
+            }
             KeyCode::Up => {
                 if picker.selected > 0 {
                     picker.selected -= 1;
@@ -877,7 +947,7 @@ impl App {
                     picker.selected = 0;
                     picker.loading = true;
                     picker.error = None;
-                    self.start_remote_fetch(new_cwd)?;
+                    self.start_remote_fetch(new_cwd, picker.only_dirs)?;
                 }
             }
             KeyCode::Enter => {
@@ -889,7 +959,7 @@ impl App {
                         picker.selected = 0;
                         picker.loading = true;
                         picker.error = None;
-                        self.start_remote_fetch(new_cwd)?;
+                        self.start_remote_fetch(new_cwd, picker.only_dirs)?;
                     } else if matches!(
                         transfer_mode,
                         Some((TransferDirection::Download, TransferStep::PickSource))
@@ -947,6 +1017,31 @@ impl App {
                         title: "Transfer complete".to_string(),
                         message: "Transfer finished successfully".to_string(),
                     });
+                }
+            }
+            KeyCode::Char('b') => {
+                if let Some(transfer) = &mut self.transfer {
+                    transfer.step = TransferStep::PickTarget;
+                }
+                match self.transfer.as_ref().map(|t| t.direction) {
+                    Some(TransferDirection::Upload) => {
+                        let start = self
+                            .transfer
+                            .as_ref()
+                            .and_then(|t| t.target_dir.as_ref())
+                            .cloned()
+                            .unwrap_or_else(|| "/".to_string());
+                        self.open_remote_picker_at(start, true)?;
+                    }
+                    Some(TransferDirection::Download) => {
+                        let start = self
+                            .transfer
+                            .as_ref()
+                            .and_then(|t| t.target_local_dir.as_ref())
+                            .map(|p| p.to_path_buf());
+                        self.open_local_target_picker_at(start)?;
+                    }
+                    None => {}
                 }
             }
             _ => {}
@@ -1127,9 +1222,10 @@ impl App {
             source_is_dir: false,
             target_dir: None,
             target_local_dir: None,
+            size_bytes: None,
         });
         if let Ok(start_dir) = resolve_picker_start("") {
-            if let Ok(entries) = read_dir_entries(&start_dir) {
+            if let Ok(entries) = read_dir_entries_filtered(&start_dir, false) {
                 self.file_picker = Some(FilePickerState {
                     cwd: start_dir,
                     entries,
@@ -1153,6 +1249,7 @@ impl App {
             source_is_dir: false,
             target_dir: None,
             target_local_dir: None,
+            size_bytes: None,
         });
         if let Err(err) = self.open_remote_picker() {
             self.status = format!("Failed to open remote picker: {err}");
@@ -1165,14 +1262,17 @@ impl App {
             transfer.source_path = Some(path);
             transfer.source_is_dir = is_dir;
             transfer.step = TransferStep::PickTarget;
+            transfer.size_bytes = compute_local_size(&transfer.source_path, is_dir).ok();
         }
     }
 
     fn select_remote_source(&mut self, path: String, is_dir: bool) {
+        let size = self.compute_remote_size(Some(&path), is_dir).ok();
         if let Some(transfer) = &mut self.transfer {
             transfer.source_remote = Some(path);
             transfer.source_is_dir = is_dir;
             transfer.step = TransferStep::PickTarget;
+            transfer.size_bytes = size;
         }
     }
 
@@ -1182,15 +1282,24 @@ impl App {
         } else {
             "/".to_string()
         };
+        let only_dirs = self
+            .transfer
+            .as_ref()
+            .is_some_and(|t| t.direction == TransferDirection::Upload && t.step == TransferStep::PickTarget);
+        self.open_remote_picker_at(cwd, only_dirs)
+    }
+
+    fn open_remote_picker_at(&mut self, cwd: String, only_dirs: bool) -> Result<()> {
         self.remote_picker = Some(RemotePickerState {
             cwd: cwd.clone(),
             entries: vec![],
             selected: 0,
             loading: true,
             error: None,
+            only_dirs,
         });
-        if let Err(_err) = self.start_remote_fetch(cwd.clone()) {
-            if let Err(err) = self.start_remote_fetch("/".to_string()) {
+        if let Err(_err) = self.start_remote_fetch(cwd.clone(), only_dirs) {
+            if let Err(err) = self.start_remote_fetch("/".to_string(), only_dirs) {
                 return Err(err);
             }
             if let Some(picker) = &mut self.remote_picker {
@@ -1201,14 +1310,11 @@ impl App {
     }
 
     fn open_local_target_picker(&mut self) -> Result<()> {
-        let start_dir = resolve_picker_start("")?;
-        let entries = read_dir_entries(&start_dir)?;
-        self.file_picker = Some(FilePickerState {
-            cwd: start_dir,
-            entries,
-            selected: 0,
-        });
-        Ok(())
+        self.open_local_target_picker_at(None)
+    }
+
+    fn open_local_target_picker_at(&mut self, start: Option<PathBuf>) -> Result<()> {
+        self.open_local_picker(start, true)
     }
 
     fn select_target_dir(&mut self, path: String) {
@@ -1284,7 +1390,7 @@ impl App {
         }
     }
 
-    fn start_remote_fetch(&mut self, cwd: String) -> Result<()> {
+    fn start_remote_fetch(&mut self, cwd: String, only_dirs: bool) -> Result<()> {
         let Some(conn) = self.selected_connected_connection() else {
             anyhow::bail!("Selected connection is not connected");
         };
@@ -1303,6 +1409,9 @@ impl App {
                         continue;
                     }
                     let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
+                    if only_dirs && !is_dir {
+                        continue;
+                    }
                     let full = if cwd == "/" {
                         format!("/{name}")
                     } else {
@@ -1332,7 +1441,11 @@ impl App {
                 picker.loading = false;
                 match result {
                     Ok(entries) => {
-                        picker.entries = entries;
+                        if picker.only_dirs {
+                            picker.entries = entries.into_iter().filter(|e| e.is_dir).collect();
+                        } else {
+                            picker.entries = entries;
+                        }
                         picker.error = None;
                     }
                     Err(err) => {
@@ -1359,6 +1472,21 @@ impl App {
         }
         candidates
     }
+
+    fn compute_remote_size(&self, path: Option<&String>, is_dir: bool) -> Result<u64> {
+        let Some(path) = path else {
+            anyhow::bail!("missing remote source");
+        };
+        let Some(conn) = self.selected_connected_connection() else {
+            anyhow::bail!("Selected connection is not connected");
+        };
+        let open_conn = self
+            .open_connections
+            .iter()
+            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
+            .context("selected connection is not connected")?;
+        crate::ssh::remote_size(&open_conn.session, path, is_dir)
+    }
 }
 
 enum EditAction {
@@ -1382,13 +1510,16 @@ fn resolve_picker_start(current: &str) -> Result<PathBuf> {
     std::env::current_dir().context("current dir")
 }
 
-fn read_dir_entries(dir: &Path) -> Result<Vec<FileEntry>> {
+fn read_dir_entries_filtered(dir: &Path, only_dirs: bool) -> Result<Vec<FileEntry>> {
     let mut entries = Vec::new();
     for entry in fs::read_dir(dir).context("read dir")? {
         let entry = entry.context("read dir entry")?;
         let path = entry.path();
         let file_type = entry.file_type().context("read file type")?;
         let name = entry.file_name().to_string_lossy().into_owned();
+        if only_dirs && !file_type.is_dir() {
+            continue;
+        }
         entries.push(FileEntry {
             name,
             path,
@@ -1397,4 +1528,29 @@ fn read_dir_entries(dir: &Path) -> Result<Vec<FileEntry>> {
     }
     entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(entries)
+}
+
+fn compute_local_size(path: &Option<PathBuf>, is_dir: bool) -> Result<u64> {
+    let Some(path) = path else {
+        anyhow::bail!("missing source");
+    };
+    if !is_dir {
+        let meta = fs::metadata(path).context("stat file")?;
+        return Ok(meta.len());
+    }
+    fn walk(dir: &Path) -> Result<u64> {
+        let mut total = 0u64;
+        for entry in fs::read_dir(dir).context("read dir")? {
+            let entry = entry.context("read dir entry")?;
+            let path = entry.path();
+            let meta = entry.metadata().context("stat entry")?;
+            if meta.is_dir() {
+                total = total.saturating_add(walk(&path)?);
+            } else {
+                total = total.saturating_add(meta.len());
+            }
+        }
+        Ok(total)
+    }
+    walk(path)
 }

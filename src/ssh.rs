@@ -177,6 +177,39 @@ pub(crate) fn download_path(
     Ok(())
 }
 
+pub(crate) fn remote_size(session: &Session, path: &str, is_dir: bool) -> Result<u64> {
+    let sftp = session.sftp().context("open sftp")?;
+    if !is_dir {
+        let stat = sftp.stat(Path::new(path)).context("stat remote file")?;
+        return Ok(stat.size.unwrap_or(0));
+    }
+    fn walk(sftp: &ssh2::Sftp, path: &str) -> Result<u64> {
+        let mut total = 0u64;
+        for (child, stat) in sftp.readdir(Path::new(path)).context("read remote dir")? {
+            let name = child
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| String::from("/"));
+            if name == "." || name == ".." {
+                continue;
+            }
+            let child_path = if path.ends_with('/') {
+                format!("{path}{name}")
+            } else {
+                format!("{path}/{name}")
+            };
+            let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
+            if is_dir {
+                total = total.saturating_add(walk(sftp, &child_path)?);
+            } else {
+                total = total.saturating_add(stat.size.unwrap_or(0));
+            }
+        }
+        Ok(total)
+    }
+    walk(&sftp, path)
+}
+
 fn download_dir(sftp: &ssh2::Sftp, remote_dir: &str, local_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(local_dir).context("create local dir")?;
     for (path, stat) in sftp
