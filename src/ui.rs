@@ -9,8 +9,7 @@ use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, 
 use crate::app::App;
 use crate::model::{AuthConfig, AuthKind, Field, MasterField, Mode};
 
-const HELP_TEXT: &str = "(t)erminal | (u)pload | (d)ownload | (o)ptions | (h)eader mode | (q)uit";
-const CONNECTION_COMMANDS: &str = "(n)ew | (e)dit | (c)onnect/(c)ancel | (d)ownload | (x)delete";
+const HELP_TEXT: &str = "(t)erminal | (u)pload | (d)ownload | (o)ptions | (v)iew | (q)uit";
 const LABEL_WIDTH: usize = 9;
 const TRANSFER_PICKER_WIDTH: u16 = 60;
 const TRANSFER_PICKER_HEIGHT: u16 = 90;
@@ -196,7 +195,17 @@ fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
     frame.render_stateful_widget(list, list_area, &mut state);
 
-    let commands = Paragraph::new(CONNECTION_COMMANDS)
+    let selected_connected = app
+        .connections
+        .get(app.selected_saved)
+        .map(|conn| connected.contains(&crate::model::connection_key(conn)))
+        .unwrap_or(false);
+    let connection_commands = if selected_connected {
+        "(n)ew | (e)dit | (c)ancel | (d)ownload | (x)delete"
+    } else {
+        "(n)ew | (e)dit | (c)onnect | (d)ownload | (x)delete"
+    };
+    let commands = Paragraph::new(connection_commands)
         .style(Style::default().fg(Color::Gray))
         .alignment(Alignment::Center);
     let commands_area = Rect {
@@ -270,7 +279,7 @@ fn draw_open_tabs(
                             .title(Line::from(Span::styled(
                                 "Help",
                                 Style::default()
-                                    .fg(Color::Yellow)
+                                    .fg(Color::Magenta)
                                     .add_modifier(Modifier::BOLD),
                             )))
                             .borders(Borders::ALL),
@@ -413,7 +422,7 @@ fn draw_open_tabs(
                     .title(Line::from(Span::styled(
                         "Logs",
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(Color::Magenta)
                             .add_modifier(Modifier::BOLD),
                     )))
                     .borders(Borders::ALL),

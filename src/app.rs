@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::SystemTime;
 
+use chrono::Datelike;
+
 use anyhow::{Context, Result};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as Base64;
@@ -201,7 +203,7 @@ impl App {
     }
 
     fn log_line(&mut self, message: &str) {
-        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let timestamp = chrono::Local::now().format("%m-%d %H:%M:%S");
         let line = format!("{timestamp} | {message}");
         if let Some(parent) = self.log_path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -296,7 +298,7 @@ impl App {
                     self.connect_selected();
                 }
             }
-            KeyCode::Char('h') => {
+            KeyCode::Char('v') => {
                 self.cycle_header_mode();
             }
             KeyCode::Char('t') => {
@@ -1803,10 +1805,12 @@ fn prune_log_file(path: &Path, days: i64, max_entries: usize) {
         return;
     };
     let cutoff = chrono::Local::now().naive_local() - chrono::Duration::days(days);
+    let current_year = chrono::Local::now().year();
     let mut kept = Vec::new();
     for line in content.lines() {
         if let Some((ts, _)) = line.split_once(" | ") {
-            if let Ok(parsed) = chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S") {
+            let with_year = format!("{current_year}-{ts}");
+            if let Ok(parsed) = chrono::NaiveDateTime::parse_from_str(&with_year, "%Y-%m-%d %H:%M:%S") {
                 if parsed >= cutoff {
                     kept.push(line.to_string());
                 }
