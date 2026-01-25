@@ -263,6 +263,7 @@ pub(crate) fn transfer_path_with_progress(
     target_dir: &str,
     source_is_dir: bool,
     tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+    cancel_rx: &std::sync::mpsc::Receiver<()>,
 ) -> Result<()> {
     let sftp = session.sftp().context("open sftp")?;
     let name = source
@@ -271,9 +272,9 @@ pub(crate) fn transfer_path_with_progress(
         .ok_or_else(|| anyhow::anyhow!("missing source filename"))?;
     let remote_base = format!("{}/{}", target_dir.trim_end_matches('/'), name);
     if source_is_dir {
-        upload_dir_with_progress(&sftp, source, &remote_base, tx)?;
+        upload_dir_with_progress(&sftp, source, &remote_base, tx, cancel_rx)?;
     } else {
-        upload_file_with_progress(&sftp, source, &remote_base, tx)?;
+        upload_file_with_progress(&sftp, source, &remote_base, tx, cancel_rx)?;
     }
     Ok(())
 }
@@ -284,6 +285,7 @@ pub(crate) fn download_path_with_progress(
     target_dir: &Path,
     source_is_dir: bool,
     tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+    cancel_rx: &std::sync::mpsc::Receiver<()>,
 ) -> Result<()> {
     let sftp = session.sftp().context("open sftp")?;
     let name = Path::new(source)
@@ -292,9 +294,9 @@ pub(crate) fn download_path_with_progress(
         .ok_or_else(|| anyhow::anyhow!("missing source filename"))?;
     let local_base = target_dir.join(name);
     if source_is_dir {
-        download_dir_with_progress(&sftp, source, &local_base, tx)?;
+        download_dir_with_progress(&sftp, source, &local_base, tx, cancel_rx)?;
     } else {
-        download_file_with_progress(&sftp, source, &local_base, tx)?;
+        download_file_with_progress(&sftp, source, &local_base, tx, cancel_rx)?;
     }
     Ok(())
 }
@@ -334,7 +336,9 @@ fn upload_dir_with_progress(
     local_dir: &Path,
     remote_dir: &str,
     tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+    cancel_rx: &std::sync::mpsc::Receiver<()>,
 ) -> Result<()> {
+    check_cancel(cancel_rx)?;
     let _ = sftp.mkdir(Path::new(remote_dir), 0o755);
     for entry in std::fs::read_dir(local_dir).context("read local dir")? {
         let entry = entry.context("read local dir entry")?;
@@ -342,9 +346,9 @@ fn upload_dir_with_progress(
         let name = entry.file_name().to_string_lossy().into_owned();
         let remote_path = format!("{remote_dir}/{name}");
         if path.is_dir() {
-            upload_dir_with_progress(sftp, &path, &remote_path, tx)?;
+            upload_dir_with_progress(sftp, &path, &remote_path, tx, cancel_rx)?;
         } else {
-            upload_file_with_progress(sftp, &path, &remote_path, tx)?;
+            upload_file_with_progress(sftp, &path, &remote_path, tx, cancel_rx)?;
         }
     }
     Ok(())
@@ -355,6 +359,7 @@ fn upload_file_with_progress(
     local_path: &Path,
     remote_path: &str,
     tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+    cancel_rx: &std::sync::mpsc::Receiver<()>,
 ) -> Result<()> {
     let mut local = File::open(local_path).context("open local file")?;
     let mut remote = sftp
@@ -367,6 +372,7 @@ fn upload_file_with_progress(
         .context("open remote file")?;
     let mut buffer = [0u8; 8192];
     loop {
+        check_cancel(cancel_rx)?;
         let read = local.read(&mut buffer).context("read local file")?;
         if read == 0 {
             break;
@@ -382,7 +388,9 @@ fn download_dir_with_progress(
     remote_dir: &str,
     local_dir: &Path,
     tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+    cancel_rx: &std::sync::mpsc::Receiver<()>,
 ) -> Result<()> {
+    check_cancel(cancel_rx)?;
     std::fs::create_dir_all(local_dir).context("create local dir")?;
     for (path, stat) in sftp
         .readdir(Path::new(remote_dir))
@@ -403,9 +411,9 @@ fn download_dir_with_progress(
         };
         let local_path = local_dir.join(&name);
         if is_dir {
-            download_dir_with_progress(sftp, &remote_path, &local_path, tx)?;
+            download_dir_with_progress(sftp, &remote_path, &local_path, tx, cancel_rx)?;
         } else {
-            download_file_with_progress(sftp, &remote_path, &local_path, tx)?;
+            download_file_with_progress(sftp, &remote_path, &local_path, tx, cancel_rx)?;
         }
     }
     Ok(())
@@ -416,17 +424,26 @@ fn download_file_with_progress(
     remote_path: &str,
     local_path: &Path,
     tx: &std::sync::mpsc::Sender<crate::model::TransferUpdate>,
+    cancel_rx: &std::sync::mpsc::Receiver<()>,
 ) -> Result<()> {
     let mut remote = sftp.open(Path::new(remote_path)).context("open remote file")?;
     let mut local = File::create(local_path).context("create local file")?;
     let mut buffer = [0u8; 8192];
     loop {
+        check_cancel(cancel_rx)?;
         let read = remote.read(&mut buffer).context("read remote file")?;
         if read == 0 {
             break;
         }
         local.write_all(&buffer[..read]).context("write local file")?;
         let _ = tx.send(crate::model::TransferUpdate::Bytes(read as u64));
+    }
+    Ok(())
+}
+
+fn check_cancel(cancel_rx: &std::sync::mpsc::Receiver<()>) -> Result<()> {
+    if cancel_rx.try_recv().is_ok() {
+        anyhow::bail!("Transfer cancelled");
     }
     Ok(())
 }

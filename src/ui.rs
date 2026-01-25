@@ -23,10 +23,24 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
         .constraints([Constraint::Min(1)].as_ref())
         .split(frame.area());
 
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)].as_ref())
-        .split(layout[0]);
+    let body = if app.header_mode == crate::app::HeaderMode::Help {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(
+                [
+                    Constraint::Percentage(33),
+                    Constraint::Percentage(33),
+                    Constraint::Percentage(34),
+                ]
+                .as_ref(),
+            )
+            .split(layout[0])
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
+            .split(layout[0])
+    };
 
     let left = if app.header_mode != crate::app::HeaderMode::Off {
         Layout::default()
@@ -46,7 +60,11 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
     } else {
         draw_saved_list(frame, app, left[0]);
     }
-    draw_open_tabs(frame, app, body[1]);
+    if app.header_mode == crate::app::HeaderMode::Help {
+        draw_open_tabs(frame, app, body[1], Some(body[2]));
+    } else {
+        draw_open_tabs(frame, app, body[1], None);
+    }
 
     if app.mode == Mode::NewConnection {
         draw_new_connection_modal(frame, app);
@@ -66,7 +84,12 @@ pub(crate) fn draw_ui(frame: &mut Frame<'_>, app: &App) {
     if app
         .transfer
         .as_ref()
-        .is_some_and(|t| matches!(t.step, crate::model::TransferStep::Confirm | crate::model::TransferStep::Transferring))
+        .is_some_and(|t| matches!(t.step, crate::model::TransferStep::Confirm))
+        || app
+            .transfer
+            .as_ref()
+            .is_some_and(|t| matches!(t.step, crate::model::TransferStep::Transferring))
+            && !app.transfer_hidden
     {
         draw_transfer_confirm_modal(frame, app);
     }
@@ -178,7 +201,7 @@ fn draw_app_header(frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(title, area);
 }
 
-fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect, logs_area: Option<Rect>) {
     let header_style = Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD);
     let tabs_area = Rect {
         x: area.x,
@@ -202,6 +225,13 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
     if let Some(help_area) = help_area {
         match app.header_mode {
             crate::app::HeaderMode::Help => {
+                let help_width = help_area.width.saturating_mul(2) / 3;
+                let help_area = Rect {
+                    x: help_area.x,
+                    y: help_area.y,
+                    width: help_width,
+                    height: help_area.height,
+                };
                 let help = Paragraph::new(HELP_TEXT)
                     .block(Block::default().title(Line::from(Span::styled(
                         "Help",
@@ -211,7 +241,14 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 frame.render_widget(help, help_area);
             }
             crate::app::HeaderMode::Logs => {
-                let logs = Paragraph::new(app.last_log.as_str())
+                let log_lines = app
+                    .log_lines
+                    .iter()
+                    .rev()
+                    .take(help_area.height.saturating_sub(2) as usize)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let logs = Paragraph::new(log_lines.join("\n"))
                     .block(Block::default().title(Line::from(Span::styled(
                         "Logs",
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
@@ -229,7 +266,7 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .iter()
         .map(|conn| crate::model::connection_key(&conn.config))
         .collect();
-    let content = if let Some(conn) = app.connections.get(app.selected_saved) {
+    let details = if let Some(conn) = app.connections.get(app.selected_saved) {
         let key = crate::model::connection_key(conn);
         let status = if connected.contains(&key) {
             "Connected"
@@ -325,8 +362,24 @@ fn draw_open_tabs(frame: &mut Frame<'_>, app: &App, area: Rect) {
             )
             .alignment(Alignment::Center)
     };
-
-    frame.render_widget(content, body_area);
+    frame.render_widget(details, body_area);
+    if let Some(logs_area) = logs_area {
+        let log_lines = app
+            .log_lines
+            .iter()
+            .rev()
+            .take(logs_area.height.saturating_sub(2) as usize)
+            .cloned()
+            .collect::<Vec<_>>();
+        let logs = Paragraph::new(log_lines.join("\n"))
+            .block(Block::default().title(Line::from(Span::styled(
+                "Logs",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ))).borders(Borders::ALL))
+            .style(Style::default().fg(Color::Gray))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(logs, logs_area);
+    }
 }
 
 fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
@@ -825,17 +878,27 @@ fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
         frame.render_widget(gauge, layout[1]);
     }
 
-    let footer = Paragraph::new(Line::from(vec![
-        Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to transfer, "),
-        Span::styled("B", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" "),
-        Span::raw(back_label),
-        Span::raw(", "),
-        Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" to cancel"),
-    ]))
-    .style(Style::default().fg(Color::Gray));
+    let footer = if transferring {
+        Paragraph::new(Line::from(vec![
+            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to hide, "),
+            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to cancel"),
+        ]))
+        .style(Style::default().fg(Color::Gray))
+    } else {
+        Paragraph::new(Line::from(vec![
+            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to transfer, "),
+            Span::styled("B", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::raw(back_label),
+            Span::raw(", "),
+            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" to cancel"),
+        ]))
+        .style(Style::default().fg(Color::Gray))
+    };
     let footer_area = if transferring { layout[2] } else { layout[1] };
     frame.render_widget(footer, footer_area);
 }

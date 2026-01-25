@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -43,6 +43,7 @@ pub(crate) struct App {
     pub(crate) config_path: PathBuf,
     pub(crate) log_path: PathBuf,
     pub(crate) last_log: String,
+    pub(crate) log_lines: VecDeque<String>,
     pub(crate) master: crate::model::MasterConfig,
     pub(crate) master_key: Vec<u8>,
     pub(crate) connections: Vec<ConnectionConfig>,
@@ -70,6 +71,9 @@ pub(crate) struct App {
     pub(crate) remote_picker: Option<RemotePickerState>,
     remote_fetch: Option<mpsc::Receiver<Result<Vec<RemoteEntry>>>>,
     transfer_progress: Option<mpsc::Receiver<TransferUpdate>>,
+    transfer_cancel: Option<mpsc::Sender<()>>,
+    pub(crate) transfer_hidden: bool,
+    transfer_last_logged: u64,
 }
 
 impl App {
@@ -77,11 +81,14 @@ impl App {
         let config_path = config_path()?;
         let (master, master_key, connections) = load_or_init_store(&config_path)?;
         let log_path = log_path()?;
-        let last_log = load_last_log(&log_path).unwrap_or_else(|| String::from("No logs yet"));
+        prune_log_file(&log_path, 7, 10_000);
+        let log_lines = VecDeque::new();
+        let last_log = String::from("No logs yet");
         let mut app = Self {
             config_path,
             log_path,
             last_log,
+            log_lines,
             master,
             master_key,
             connections,
@@ -109,6 +116,9 @@ impl App {
             remote_picker: None,
             remote_fetch: None,
             transfer_progress: None,
+            transfer_cancel: None,
+            transfer_hidden: false,
+            transfer_last_logged: 0,
         };
         app.sort_connections_by_recent(None);
         app.set_status("Ready");
@@ -151,7 +161,17 @@ impl App {
             if self.remote_picker.is_some() {
                 return self.handle_remote_picker_key(key);
             }
-            if matches!(self.transfer.as_ref().map(|t| t.step), Some(TransferStep::Confirm | TransferStep::Transferring)) {
+            if self
+                .transfer
+                .as_ref()
+                .is_some_and(|t| t.step == TransferStep::Transferring)
+                && self.transfer_hidden
+            {
+                // Allow normal navigation while transfer runs in background.
+            } else if matches!(
+                self.transfer.as_ref().map(|t| t.step),
+                Some(TransferStep::Confirm | TransferStep::Transferring)
+            ) {
                 return self.handle_transfer_confirm(key);
             }
         }
@@ -192,7 +212,11 @@ impl App {
             use std::io::Write;
             let _ = writeln!(file, "{line}");
         }
-        self.last_log = line;
+        self.last_log = line.clone();
+        self.log_lines.push_back(line);
+        while self.log_lines.len() > 100 {
+            self.log_lines.pop_front();
+        }
     }
 
     fn cycle_header_mode(&mut self) {
@@ -1090,6 +1114,17 @@ impl App {
             self.transfer.as_ref().map(|t| t.step),
             Some(TransferStep::Transferring)
         ) {
+            match key.code {
+                KeyCode::Esc => {
+                    if let Some(cancel) = self.transfer_cancel.take() {
+                        let _ = cancel.send(());
+                    }
+                }
+                KeyCode::Enter => {
+                    self.transfer_hidden = true;
+                }
+                _ => {}
+            }
             return Ok(false);
         }
         match key.code {
@@ -1139,6 +1174,7 @@ impl App {
             return;
         };
         let (tx, rx) = mpsc::channel();
+        let (cancel_tx, cancel_rx) = mpsc::channel();
         let transfer_clone = transfer.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<()> {
@@ -1157,6 +1193,7 @@ impl App {
                             &target_dir,
                             transfer_clone.source_is_dir,
                             &tx,
+                            &cancel_rx,
                         )?;
                     }
                     TransferDirection::Download => {
@@ -1172,6 +1209,7 @@ impl App {
                             &target_dir,
                             transfer_clone.source_is_dir,
                             &tx,
+                            &cancel_rx,
                         )?;
                     }
                 }
@@ -1184,6 +1222,9 @@ impl App {
         transfer.progress_bytes = 0;
         self.transfer = Some(transfer);
         self.transfer_progress = Some(rx);
+        self.transfer_cancel = Some(cancel_tx);
+        self.transfer_hidden = false;
+        self.transfer_last_logged = 0;
     }
 
     fn handle_key_picker_key(&mut self, key: KeyEvent) -> Result<bool> {
@@ -1620,8 +1661,34 @@ impl App {
         while let Ok(update) = rx.try_recv() {
             match update {
                 TransferUpdate::Bytes(amount) => {
+                    let mut log_message = None;
+                    let mut new_progress = None;
                     if let Some(transfer) = &mut self.transfer {
                         transfer.progress_bytes = transfer.progress_bytes.saturating_add(amount);
+                        let threshold = 1024 * 1024;
+                        if transfer
+                            .progress_bytes
+                            .saturating_sub(self.transfer_last_logged)
+                            >= threshold
+                        {
+                            let total = transfer.size_bytes.unwrap_or(0);
+                            log_message = Some(if total == 0 {
+                                format!("Transfer progress: {}", transfer.progress_bytes)
+                            } else {
+                                format!(
+                                    "Transfer progress: {} / {}",
+                                    transfer.progress_bytes,
+                                    total
+                                )
+                            });
+                            new_progress = Some(transfer.progress_bytes);
+                        }
+                    }
+                    if let Some(message) = log_message {
+                        self.log_line(&message);
+                    }
+                    if let Some(progress) = new_progress {
+                        self.transfer_last_logged = progress;
                     }
                 }
                 TransferUpdate::Done(result) => {
@@ -1640,6 +1707,7 @@ impl App {
                         }
                     }
                     self.transfer = None;
+                    self.transfer_cancel = None;
                     done = true;
                 }
             }
@@ -1705,6 +1773,46 @@ fn resolve_picker_start(current: &str) -> Result<PathBuf> {
 fn load_last_log(path: &Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     content.lines().rev().find(|line| !line.trim().is_empty()).map(|line| line.to_string())
+}
+
+fn load_log_lines(path: &Path, max_lines: usize) -> VecDeque<String> {
+    let mut lines = VecDeque::new();
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return lines;
+    };
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        lines.push_back(line.to_string());
+        if lines.len() > max_lines {
+            lines.pop_front();
+        }
+    }
+    lines
+}
+
+fn prune_log_file(path: &Path, days: i64, max_entries: usize) {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let cutoff = chrono::Local::now().naive_local() - chrono::Duration::days(days);
+    let mut kept = Vec::new();
+    for line in content.lines() {
+        if let Some((ts, _)) = line.split_once(" | ") {
+            if let Ok(parsed) = chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S") {
+                if parsed >= cutoff {
+                    kept.push(line.to_string());
+                }
+            }
+        }
+    }
+    if kept.len() > max_entries {
+        kept = kept.split_off(kept.len().saturating_sub(max_entries));
+    }
+    if kept.is_empty() {
+        let _ = std::fs::remove_file(path);
+    } else if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+        let _ = std::fs::write(path, kept.join("\n") + "\n");
+    }
 }
 
 fn read_dir_entries_filtered(dir: &Path, only_dirs: bool) -> Result<Vec<FileEntry>> {
