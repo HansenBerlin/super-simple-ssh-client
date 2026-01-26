@@ -63,7 +63,7 @@ jobs:
       - name: Install cargo-rpm
         run: cargo install cargo-rpm
       - name: Build rpm
-        run: cargo rpm build --locked
+        run: cargo rpm build
       - uses: actions/upload-artifact@v4
         with:
           name: fedora-package
@@ -82,7 +82,9 @@ jobs:
         run: |
           VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD
-          git archive --format=tar.gz --prefix=super-simple-ssh-client-${VERSION}/ -o "super-simple-ssh-client-${VERSION}.tar.gz" HEAD
+          tar -czf "super-simple-ssh-client-${VERSION}.tar.gz" \
+            --transform "s,^,super-simple-ssh-client-${VERSION}/," \
+            --exclude=.git --exclude=target --exclude=.idea .
           cp "super-simple-ssh-client-${VERSION}.tar.gz" packaging/arch/
           useradd -m builder
           chown -R builder:builder .
