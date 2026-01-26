@@ -27,7 +27,6 @@ summary = "Super simple SSH client"
 description = "Terminal SSH client with a ratatui interface"
 license = "MIT"
 assets = [
-  { source = "target/release/ss-ssh", dest = "/usr/bin/ss-ssh", mode = "755" },
   { source = "packaging/ss-ssh.desktop", dest = "/usr/share/applications/ss-ssh.desktop", mode = "644" }
 ]
 [package.metadata.rpm.targets]
