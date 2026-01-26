@@ -27,7 +27,10 @@ pub(crate) fn draw_new_connection_modal(frame: &mut Frame<'_>, app: &App) {
         Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(" to cancel"),
     ]));
-    if app.new_connection.auth_kind == AuthKind::PrivateKeyWithPassword {
+    if matches!(
+        app.new_connection.auth_kind,
+        AuthKind::PrivateKey | AuthKind::PrivateKeyWithPassword
+    ) {
         footer_lines.push(Line::from(Span::styled(
             "F2 to browse for key file | F3 to pick from recent keys",
             Style::default().fg(Color::Gray),
