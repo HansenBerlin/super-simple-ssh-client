@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Super Simple SSH
+Comment=Terminal SSH client
+Exec=ss-ssh
+Terminal=true
+Categories=Network;Utility;
