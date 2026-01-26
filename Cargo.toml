@@ -4,6 +4,28 @@ version = "0.1.0"
 edition = "2024"
 authors = ["hansen_docked_in <hansdrum@proton.me>"]
 license = "MIT"
+description = "Terminal SSH client with a ratatui interface"
+homepage = "https://github.com/HansenBerlin/super-simple-ssh-client"
+repository = "https://github.com/HansenBerlin/super-simple-ssh-client"
+
+[package.metadata.deb]
+maintainer = "hansen_docked_in <hansdrum@proton.me>"
+section = "net"
+priority = "optional"
+depends = "libssl3"
+assets = [
+  ["target/release/super-simple-ssh-client", "usr/bin/super-simple-ssh-client", "755"]
+]
+
+[package.metadata.rpm]
+summary = "Super simple SSH client"
+description = "Terminal SSH client with a ratatui interface"
+license = "MIT"
+assets = [
+  { source = "target/release/super-simple-ssh-client", dest = "/usr/bin/super-simple-ssh-client", mode = "755" }
+]
+[package.metadata.rpm.cargo]
+buildflags = ["--release", "--locked"]
 
 [dependencies]
 aes-gcm = "0.10.3"

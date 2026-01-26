@@ -84,7 +84,8 @@ jobs:
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD
           tar -czf "super-simple-ssh-client-${VERSION}.tar.gz" \
             --transform "s,^,super-simple-ssh-client-${VERSION}/," \
-            --exclude=.git --exclude=target --exclude=.idea .
+            --exclude=.git --exclude=target --exclude=.idea \
+            --warning=no-file-changed --ignore-failed-read .
           cp "super-simple-ssh-client-${VERSION}.tar.gz" packaging/arch/
           useradd -m builder
           chown -R builder:builder .
