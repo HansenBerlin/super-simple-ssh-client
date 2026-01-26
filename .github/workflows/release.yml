@@ -22,7 +22,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config cmake
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
       - name: Package
@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config cmake
       - name: Install cargo-deb
         run: cargo install cargo-deb
       - name: Build deb
@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install rpm tools
-        run: sudo apt-get update && sudo apt-get install -y rpm libssl-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y rpm libssl-dev pkg-config cmake
       - name: Install cargo-rpm
         run: cargo install cargo-rpm
       - name: Build rpm
@@ -77,7 +77,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install toolchain
         run: |
-          pacman -Sy --noconfirm --needed base-devel git rust cargo openssl libssh2 zlib pkgconf
+          pacman -Sy --noconfirm --needed base-devel git rust cargo openssl libssh2 zlib pkgconf cmake
       - name: Build package
         run: |
           VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
