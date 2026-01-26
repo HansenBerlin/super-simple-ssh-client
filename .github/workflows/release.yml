@@ -54,30 +54,29 @@ jobs:
 
   build-rpm:
     runs-on: ubuntu-latest
+    container: fedora:latest
     needs: build-linux
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install rpm tools
-        run: sudo apt-get update && sudo apt-get install -y rpm libssl-dev pkg-config cmake
-      - name: Install cargo-rpm
-        run: cargo install cargo-rpm
-      - name: Build rpm
-        run: cargo rpm build --verbose
-      - name: Debug rpm artifacts
-        if: failure()
+      - name: Install build dependencies
         run: |
-          echo "Cargo rpm version:"
-          cargo rpm --version || true
-          echo "Target release:"
-          ls -la target/release || true
-          echo "Packaging:"
-          ls -la packaging || true
-          ls -la packaging/ss-ssh.desktop || true
+          dnf install -y git rust cargo gcc make openssl-devel libssh2-devel zlib-devel rpm-build pkgconf-pkg-config
+      - name: Build rpm
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          sed -i "s/@VERSION@/${VERSION}/" packaging/rpm/ss-ssh.spec
+          mkdir -p rpmbuild/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
+          tar -czf "super-simple-ssh-client-${VERSION}.tar.gz" \
+            --transform "s,^,super-simple-ssh-client-${VERSION}/," \
+            --exclude=.git --exclude=target --exclude=.idea \
+            --warning=no-file-changed --ignore-failed-read .
+          mv "super-simple-ssh-client-${VERSION}.tar.gz" rpmbuild/SOURCES/
+          cp packaging/rpm/ss-ssh.spec rpmbuild/SPECS/
+          rpmbuild -ba rpmbuild/SPECS/ss-ssh.spec --define "_topdir $(pwd)/rpmbuild"
       - uses: actions/upload-artifact@v4
         with:
           name: fedora-package
-          path: target/release/rpmbuild/RPMS/**/*.rpm
+          path: rpmbuild/RPMS/**/*.rpm
 
   build-arch:
     runs-on: ubuntu-latest
