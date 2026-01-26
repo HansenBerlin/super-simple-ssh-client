@@ -70,6 +70,8 @@ pub(crate) struct App {
     pub(crate) transfer_cancel: Option<mpsc::Sender<()>>,
     pub(crate) transfer_hidden: bool,
     pub(crate) transfer_last_logged: u64,
+    pub(crate) size_calc_rx: Option<mpsc::Receiver<(u64, Result<u64>)>>,
+    pub(crate) size_calc_generation: u64,
 }
 
 impl App {
@@ -115,6 +117,8 @@ impl App {
             transfer_cancel: None,
             transfer_hidden: false,
             transfer_last_logged: 0,
+            size_calc_rx: None,
+            size_calc_generation: 0,
         };
         app.sort_connections_by_recent(None);
         app.set_status(STATUS_READY);

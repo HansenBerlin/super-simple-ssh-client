@@ -84,6 +84,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
         app.poll_remote_fetch();
         app.poll_transfer_progress();
+        app.poll_size_calc();
 
         if let Some(action) = app.pending_action.take() {
             match action {

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, TryRecvError};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::app::constants::{MB_BYTES, TRANSFER_LOG_THRESHOLD_BYTES};
 use crate::app::helpers::compute_local_size;
@@ -67,33 +67,48 @@ impl App {
     }
 
     pub(crate) fn select_target_dir(&mut self, path: String) {
-        if let Some(transfer) = &mut self.transfer {
+        let (source_path, source_is_dir, should_calc) = if let Some(transfer) = &mut self.transfer
+        {
             transfer.target_dir = Some(path);
             transfer.step = TransferStep::Confirm;
-            if transfer.size_bytes.is_none() {
-                transfer.size_bytes =
-                    compute_local_size(&transfer.source_path, transfer.source_is_dir).ok();
-            }
+            (
+                transfer.source_path.clone(),
+                transfer.source_is_dir,
+                transfer.size_bytes.is_none(),
+            )
+        } else {
+            return;
+        };
+        if should_calc {
+            self.start_size_calc(move || compute_local_size(&source_path, source_is_dir));
         }
     }
 
     pub(crate) fn select_target_local_dir(&mut self, path: PathBuf) {
-        let size = if let Some(transfer) = &self.transfer {
-            if transfer.size_bytes.is_none() {
-                self.compute_remote_size(transfer.source_remote.as_ref(), transfer.source_is_dir)
-                    .ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        if let Some(transfer) = &mut self.transfer {
+        let (source_remote, source_is_dir, should_calc) = if let Some(transfer) = &mut self.transfer
+        {
             transfer.target_local_dir = Some(path);
             transfer.step = TransferStep::Confirm;
-            if transfer.size_bytes.is_none() {
-                transfer.size_bytes = size;
-            }
+            (
+                transfer.source_remote.clone(),
+                transfer.source_is_dir,
+                transfer.size_bytes.is_none(),
+            )
+        } else {
+            return;
+        };
+        if should_calc {
+            let Some(conn) = self.selected_connected_connection() else {
+                self.set_status("Selected connection is not connected");
+                return;
+            };
+            self.start_size_calc(move || {
+                let session = connect_ssh(&conn)?;
+                let Some(path) = source_remote else {
+                    anyhow::bail!("missing remote source");
+                };
+                crate::ssh::remote_size(&session, &path, source_is_dir)
+            });
         }
     }
 
@@ -225,18 +240,43 @@ impl App {
         }
     }
 
-    fn compute_remote_size(&self, path: Option<&String>, is_dir: bool) -> Result<u64> {
-        let Some(path) = path else {
-            anyhow::bail!("missing remote source");
+    pub(crate) fn poll_size_calc(&mut self) {
+        let Some(rx) = self.size_calc_rx.take() else {
+            return;
         };
-        let Some(conn) = self.selected_connected_connection() else {
-            anyhow::bail!("Selected connection is not connected");
-        };
-        let open_conn = self
-            .open_connections
-            .iter()
-            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
-            .context("selected connection is not connected")?;
-        crate::ssh::remote_size(&open_conn.session, path, is_dir)
+        match rx.try_recv() {
+            Ok((generation, result)) => {
+                if generation == self.size_calc_generation {
+                    match result {
+                        Ok(size) => {
+                            if let Some(transfer) = &mut self.transfer {
+                                transfer.size_bytes = Some(size);
+                            }
+                        }
+                        Err(err) => {
+                            self.set_status(format!("Failed to compute size: {err}"));
+                        }
+                    }
+                }
+            }
+            Err(TryRecvError::Empty) => {
+                self.size_calc_rx = Some(rx);
+            }
+            Err(TryRecvError::Disconnected) => {}
+        }
+    }
+
+    fn start_size_calc<F>(&mut self, job: F)
+    where
+        F: FnOnce() -> Result<u64> + Send + 'static,
+    {
+        self.size_calc_generation = self.size_calc_generation.wrapping_add(1);
+        let generation = self.size_calc_generation;
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = job();
+            let _ = tx.send((generation, result));
+        });
+        self.size_calc_rx = Some(rx);
     }
 }

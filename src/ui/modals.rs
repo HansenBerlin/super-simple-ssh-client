@@ -292,10 +292,13 @@ pub(crate) fn draw_transfer_confirm_modal(frame: &mut Frame<'_>, app: &App) {
             (source, target)
         }
     };
-    let size_label = transfer
-        .size_bytes
-        .map(format_bytes)
-        .unwrap_or_else(|| "-".to_string());
+    let size_label = if let Some(size) = transfer.size_bytes {
+        format_bytes(size)
+    } else if transfer.step == crate::model::TransferStep::Confirm {
+        String::from("calculating size...")
+    } else {
+        String::from("-")
+    };
 
     let mut lines = vec![
         Line::from(format!("Source: {source}")),

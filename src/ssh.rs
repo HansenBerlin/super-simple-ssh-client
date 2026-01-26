@@ -147,6 +147,9 @@ pub(crate) fn run_ssh_terminal(session: &Session) -> Result<()> {
 }
 
 pub(crate) fn remote_size(session: &Session, path: &str, is_dir: bool) -> Result<u64> {
+    if let Ok(Some(size)) = remote_size_via_du(session, path) {
+        return Ok(size);
+    }
     let sftp = session.sftp().context("open sftp")?;
     if !is_dir {
         let stat = sftp.stat(Path::new(path)).context("stat remote file")?;
@@ -177,6 +180,30 @@ pub(crate) fn remote_size(session: &Session, path: &str, is_dir: bool) -> Result
         Ok(total)
     }
     walk(&sftp, path)
+}
+
+fn remote_size_via_du(session: &Session, path: &str) -> Result<Option<u64>> {
+    let escaped = shell_escape(path);
+    let command = format!("du -sb --apparent-size -- {escaped} 2>/dev/null");
+    let mut channel = session.channel_session().context("open channel")?;
+    channel.exec(&command).context("exec du")?;
+    let mut output = String::new();
+    channel.read_to_string(&mut output).ok();
+    channel.wait_close().ok();
+    let size = output
+        .split_whitespace()
+        .next()
+        .and_then(|token| token.parse::<u64>().ok());
+    Ok(size)
+}
+
+fn shell_escape(value: &str) -> String {
+    if value.is_empty() {
+        "''".to_string()
+    } else {
+        let escaped = value.replace('\'', "'\"'\"'");
+        format!("'{escaped}'")
+    }
 }
 
 pub(crate) fn remote_has_subdirectories(session: &Session, path: &str) -> Result<bool> {
