@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use ssh2::Session;
 
 use crate::model::{AuthConfig, ConnectionConfig};
@@ -80,6 +81,8 @@ pub(crate) fn run_ssh_terminal(session: &Session) -> Result<()> {
     writeln!(stdout, "Connected. Press Ctrl+g to return to the client.").ok();
     stdout.flush().ok();
 
+    enable_raw_mode().ok();
+
     let mut buffer = [0u8; 4096];
     let mut err_buffer = [0u8; 1024];
 
@@ -115,20 +118,29 @@ pub(crate) fn run_ssh_terminal(session: &Session) -> Result<()> {
         }
 
         if event::poll(Duration::from_millis(30))? {
-            if let Event::Key(key) = event::read()? {
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && matches!(key.code, KeyCode::Char('g'))
-                {
-                    break;
+            match event::read()? {
+                Event::Key(key) => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL)
+                        && matches!(key.code, KeyCode::Char('g'))
+                    {
+                        break;
+                    }
+                    if let Some(bytes) = key_to_bytes(key) {
+                        channel.write_all(&bytes).ok();
+                        channel.flush().ok();
+                    }
                 }
-                if let Some(bytes) = key_to_bytes(key) {
-                    channel.write_all(&bytes).ok();
-                    channel.flush().ok();
+                Event::Resize(cols, rows) => {
+                    channel
+                        .request_pty_size(u32::from(cols), u32::from(rows), None, None)
+                        .ok();
                 }
+                _ => {}
             }
         }
     }
 
+    disable_raw_mode().ok();
     session.set_blocking(true);
     channel.close().ok();
     Ok(())
