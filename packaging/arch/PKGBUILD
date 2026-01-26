@@ -17,5 +17,6 @@ build() {
 
 package() {
   cd "${srcdir}/${pkgname}-${pkgver}"
-  install -Dm755 "target/release/${pkgname}" "${pkgdir}/usr/bin/${pkgname}"
+  install -Dm755 "target/release/ss-ssh" "${pkgdir}/usr/bin/ss-ssh"
+  install -Dm644 "packaging/ss-ssh.desktop" "${pkgdir}/usr/share/applications/ss-ssh.desktop"
 }

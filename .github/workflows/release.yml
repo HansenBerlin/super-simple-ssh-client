@@ -27,7 +27,7 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
       - name: Package
         run: |
-          BIN=target/${{ matrix.target }}/release/super-simple-ssh-client
+          BIN=target/${{ matrix.target }}/release/ss-ssh
           TAR=super-simple-ssh-client-${{ matrix.target }}.tar.gz
           tar -czf "$TAR" -C "$(dirname "$BIN")" "$(basename "$BIN")"
       - uses: actions/upload-artifact@v4
