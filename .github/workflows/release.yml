@@ -37,6 +37,7 @@ jobs:
 
   build-deb:
     runs-on: ubuntu-latest
+    needs: build-linux
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -53,6 +54,7 @@ jobs:
 
   build-rpm:
     runs-on: ubuntu-latest
+    needs: build-linux
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -70,6 +72,7 @@ jobs:
   build-arch:
     runs-on: ubuntu-latest
     container: archlinux:latest
+    needs: build-linux
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
