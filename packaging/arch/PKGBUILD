@@ -1,0 +1,21 @@
+pkgname=super-simple-ssh-client
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Super Simple SSH client"
+arch=('x86_64')
+url="https://github.com/${GITHUB_REPOSITORY}"
+license=('MIT')
+depends=('glibc')
+makedepends=('cargo' 'rust')
+source=("${pkgname}-${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  cargo build --release --locked
+}
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  install -Dm755 "target/release/${pkgname}" "${pkgdir}/usr/bin/${pkgname}"
+}

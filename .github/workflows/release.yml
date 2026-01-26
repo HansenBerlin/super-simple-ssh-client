@@ -1,0 +1,120 @@
+name: release
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          BIN=target/${{ matrix.target }}/release/super-simple-ssh-client
+          TAR=super-simple-ssh-client-${{ matrix.target }}.tar.gz
+          tar -czf "$TAR" -C "$(dirname "$BIN")" "$(basename "$BIN")"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.target }}
+          path: super-simple-ssh-client-${{ matrix.target }}.tar.gz
+
+  build-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+      - name: Build deb
+        run: cargo deb --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: target/debian/*.deb
+
+  build-rpm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install rpm tools
+        run: sudo apt-get update && sudo apt-get install -y rpm
+      - name: Install cargo-rpm
+        run: cargo install cargo-rpm
+      - name: Build rpm
+        run: cargo rpm build --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fedora-package
+          path: target/release/rpmbuild/RPMS/**/*.rpm
+
+  build-arch:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          pacman -Sy --noconfirm --needed base-devel git rust cargo
+      - name: Build package
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD
+          git archive --format=tar.gz --prefix=super-simple-ssh-client-${VERSION}/ -o "super-simple-ssh-client-${VERSION}.tar.gz" HEAD
+          cp "super-simple-ssh-client-${VERSION}.tar.gz" packaging/arch/
+          useradd -m builder
+          chown -R builder:builder .
+          su builder -c "cd packaging/arch && makepkg -sf --noconfirm"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: packaging/arch/*.pkg.tar.zst
+
+  release:
+    runs-on: ubuntu-latest
+    needs:
+      - build-linux
+      - build-deb
+      - build-rpm
+      - build-arch
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${{ steps.version.outputs.tag }}
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+            exit 0
+          fi
+          gh release create "$TAG" --title "$TAG" --notes "Release $TAG"
+          find dist -maxdepth 3 -type f -print -exec gh release upload "$TAG" {} \;
