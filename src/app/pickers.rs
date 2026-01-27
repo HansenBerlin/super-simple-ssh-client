@@ -73,24 +73,50 @@ impl App {
             error: None,
             only_dirs,
         });
-        if let Err(_err) = self.start_remote_fetch(cwd.clone(), only_dirs) {
-            let mut fallback = None;
-            if let Some(conn) = self.selected_connected_connection() {
-                if let Ok(session) = connect_ssh(&conn) {
-                    if let Ok(home) = crate::ssh::remote_home_dir(&session) {
-                        if !home.trim().is_empty() {
-                            fallback = Some(home);
-                        }
-                    }
+        if self.try_load_remote_dir(cwd.clone(), only_dirs).is_ok() {
+            return Ok(());
+        }
+        if let Some(next) = self.remote_home_fallback() {
+            if self.try_load_remote_dir(next.clone(), only_dirs).is_ok() {
+                if let Some(picker) = &mut self.remote_picker {
+                    picker.cwd = next;
                 }
+                return Ok(());
             }
-            let next = fallback.unwrap_or_else(|| "/".to_string());
-            if let Err(err) = self.start_remote_fetch(next.clone(), only_dirs) {
-                return Err(err);
+        }
+        if let Err(err) = self.start_remote_fetch("/".to_string(), only_dirs) {
+            return Err(err);
+        }
+        if let Some(picker) = &mut self.remote_picker {
+            picker.cwd = "/".to_string();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn load_remote_dir(&mut self, cwd: String, only_dirs: bool) -> Result<()> {
+        if let Some(picker) = &mut self.remote_picker {
+            picker.cwd = cwd.clone();
+            picker.entries.clear();
+            picker.selected = 0;
+            picker.loading = true;
+            picker.error = None;
+        }
+        if self.try_load_remote_dir(cwd.clone(), only_dirs).is_ok() {
+            return Ok(());
+        }
+        if let Some(next) = self.remote_home_fallback() {
+            if self.try_load_remote_dir(next.clone(), only_dirs).is_ok() {
+                if let Some(picker) = &mut self.remote_picker {
+                    picker.cwd = next;
+                }
+                return Ok(());
             }
-            if let Some(picker) = &mut self.remote_picker {
-                picker.cwd = next;
-            }
+        }
+        if let Err(err) = self.start_remote_fetch("/".to_string(), only_dirs) {
+            return Err(err);
+        }
+        if let Some(picker) = &mut self.remote_picker {
+            picker.cwd = "/".to_string();
         }
         Ok(())
     }
@@ -184,5 +210,60 @@ impl App {
             }
         }
         candidates
+    }
+
+    fn try_load_remote_dir(&mut self, cwd: String, only_dirs: bool) -> Result<()> {
+        let Some(conn) = self.selected_connected_connection() else {
+            anyhow::bail!("Selected connection is not connected");
+        };
+        let open_conn = self
+            .open_connections
+            .iter()
+            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
+            .ok_or_else(|| anyhow::anyhow!("Selected connection is not connected"))?;
+        let sftp = open_conn.session.sftp().context("open sftp")?;
+        let mut entries = Vec::new();
+        for (path, stat) in sftp.readdir(Path::new(&cwd)).context("read remote dir")? {
+            let name = path
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| String::from("/"));
+            if name == "." || name == ".." {
+                continue;
+            }
+            let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
+            if only_dirs && !is_dir {
+                continue;
+            }
+            let full = if cwd == "/" {
+                format!("/{name}")
+            } else {
+                format!("{cwd}/{name}")
+            };
+            entries.push(RemoteEntry {
+                name,
+                path: full,
+                is_dir,
+            });
+        }
+        entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        if let Some(picker) = &mut self.remote_picker {
+            picker.entries = entries;
+            picker.loading = false;
+            picker.error = None;
+        }
+        Ok(())
+    }
+
+    fn remote_home_fallback(&self) -> Option<String> {
+        let conn = self.selected_connected_connection()?;
+        let session = connect_ssh(&conn).ok()?;
+        let home = crate::ssh::remote_home_dir(&session).ok()?;
+        let trimmed = home.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     }
 }
