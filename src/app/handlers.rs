@@ -42,6 +42,9 @@ impl App {
             }
             return Ok(false);
         }
+        if self.handle_terminal_tabs_key(key)? {
+            return Ok(false);
+        }
         self.poll_remote_fetch();
         if self.transfer.is_some() {
             if self.file_picker.is_some() {

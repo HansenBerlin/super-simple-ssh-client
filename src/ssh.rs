@@ -6,8 +6,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ssh2::Session;
 
 use crate::model::{AuthConfig, ConnectionConfig};
@@ -62,88 +61,6 @@ pub(crate) fn connect_ssh(config: &ConnectionConfig) -> Result<Session> {
     }
 
     Ok(session)
-}
-
-pub(crate) fn run_ssh_terminal(session: &Session) -> Result<()> {
-    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-    let mut channel = session.channel_session().context("open channel")?;
-    channel
-        .request_pty(
-            "xterm",
-            None,
-            Some((u32::from(cols), u32::from(rows), 0, 0)),
-        )
-        .context("request pty")?;
-    channel.shell().context("start shell")?;
-    session.set_blocking(false);
-
-    let mut stdout = io::stdout();
-    writeln!(stdout, "Connected. Press Ctrl+g to return to the client.").ok();
-    stdout.flush().ok();
-
-    enable_raw_mode().ok();
-
-    let mut buffer = [0u8; 4096];
-    let mut err_buffer = [0u8; 1024];
-
-    loop {
-        if channel.eof() {
-            break;
-        }
-
-        match channel.read(&mut buffer) {
-            Ok(0) => {}
-            Ok(count) => {
-                stdout.write_all(&buffer[..count]).ok();
-                stdout.flush().ok();
-            }
-            Err(err) => {
-                if err.kind() != io::ErrorKind::WouldBlock {
-                    return Err(err).context("read channel");
-                }
-            }
-        }
-
-        match channel.stderr().read(&mut err_buffer) {
-            Ok(0) => {}
-            Ok(count) => {
-                stdout.write_all(&err_buffer[..count]).ok();
-                stdout.flush().ok();
-            }
-            Err(err) => {
-                if err.kind() != io::ErrorKind::WouldBlock {
-                    return Err(err).context("read stderr");
-                }
-            }
-        }
-
-        if event::poll(Duration::from_millis(30))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if key.modifiers.contains(KeyModifiers::CONTROL)
-                        && matches!(key.code, KeyCode::Char('g'))
-                    {
-                        break;
-                    }
-                    if let Some(bytes) = key_to_bytes(key) {
-                        channel.write_all(&bytes).ok();
-                        channel.flush().ok();
-                    }
-                }
-                Event::Resize(cols, rows) => {
-                    channel
-                        .request_pty_size(u32::from(cols), u32::from(rows), None, None)
-                        .ok();
-                }
-                _ => {}
-            }
-        }
-    }
-
-    disable_raw_mode().ok();
-    session.set_blocking(true);
-    channel.close().ok();
-    Ok(())
 }
 
 pub(crate) fn remote_size(session: &Session, path: &str, is_dir: bool) -> Result<u64> {
@@ -401,7 +318,7 @@ pub(crate) fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn key_to_bytes(key: KeyEvent) -> Option<Vec<u8>> {
+pub(crate) fn terminal_key_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     match key.code {
         KeyCode::Char(c) => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {

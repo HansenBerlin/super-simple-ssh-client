@@ -7,6 +7,7 @@ pub(crate) const TRANSFER_PICKER_WIDTH: u16 = 60;
 pub(crate) const TRANSFER_PICKER_HEIGHT: u16 = 90;
 
 pub(crate) const HEADER_HEIGHT: u16 = 3;
+pub(crate) const TERMINAL_FOOTER_HEIGHT: u16 = 2;
 
 pub(crate) const HELP_COLUMN_PERCENTAGES: [u16; 3] = [33, 33, 34];
 pub(crate) const COMPACT_COLUMN_PERCENTAGES: [u16; 2] = [50, 50];

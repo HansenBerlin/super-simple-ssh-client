@@ -19,6 +19,7 @@ mod handlers;
 mod helpers;
 mod logging;
 mod pickers;
+mod terminal;
 mod transfer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +74,8 @@ pub(crate) struct App {
     pub(crate) transfer_last_logged: u64,
     pub(crate) size_calc_rx: Option<mpsc::Receiver<(u64, Result<u64>)>>,
     pub(crate) size_calc_generation: u64,
+    pub(crate) terminal_tabs: Vec<crate::app::terminal::TerminalTab>,
+    pub(crate) active_terminal_tab: usize,
 }
 
 impl App {
@@ -121,6 +124,8 @@ impl App {
             transfer_last_logged: 0,
             size_calc_rx: None,
             size_calc_generation: 0,
+            terminal_tabs: vec![],
+            active_terminal_tab: 0,
         };
         app.sort_connections_by_recent(None);
         app.set_status(STATUS_READY);

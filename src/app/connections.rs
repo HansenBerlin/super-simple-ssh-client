@@ -1,63 +1,16 @@
 use std::time::SystemTime;
 
 use anyhow::Result;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use crossterm::execute;
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
-
 use crate::app::constants::NOT_CONNECTED_MESSAGE;
 use crate::app::App;
 use crate::model::{
     AuthConfig, AuthKind, ConnectionConfig, HistoryEntry, HistoryState, Mode,
     NewConnectionState, OpenConnection, TryResult,
 };
-use crate::ssh::{connect_ssh, run_ssh_terminal};
+use crate::ssh::connect_ssh;
 use crate::storage::save_store;
 
 impl App {
-    pub(crate) fn handle_terminal_mode(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-    ) -> Result<()> {
-        let Some(conn) = self.selected_connected_connection() else {
-            self.set_status(NOT_CONNECTED_MESSAGE);
-            return Ok(());
-        };
-        let open_conn = match self
-            .open_connections
-            .iter()
-            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
-        {
-            Some(conn) => conn,
-            None => {
-                self.set_status(NOT_CONNECTED_MESSAGE);
-                return Ok(());
-            }
-        };
-
-        execute!(terminal.backend_mut(), DisableMouseCapture).ok();
-        disable_raw_mode().ok();
-        execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
-
-        let result = run_ssh_terminal(&open_conn.session);
-
-        execute!(terminal.backend_mut(), EnterAlternateScreen).ok();
-        enable_raw_mode().ok();
-        execute!(terminal.backend_mut(), EnableMouseCapture).ok();
-        terminal.clear().ok();
-
-        match result {
-            Ok(()) => self.set_status("Exited terminal session"),
-            Err(err) => self.set_status(format!("Terminal session error: {err}")),
-        }
-
-        Ok(())
-    }
-
     pub(crate) fn history_range(&self, history_len: usize, has_error: bool) -> (usize, usize) {
         let page_size = self.history_page_size(has_error);
         if history_len == 0 {
