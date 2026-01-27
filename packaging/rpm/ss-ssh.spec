@@ -24,7 +24,7 @@ Terminal SSH client with a ratatui interface.
 %autosetup -n %{name}-%{version}
 
 %build
-cargo build --release --offline
+cargo build --release
 
 %install
 install -Dm755 target/release/ss-ssh %{buildroot}/usr/bin/ss-ssh
@@ -35,5 +35,4 @@ install -Dm644 packaging/ss-ssh.desktop %{buildroot}/usr/share/applications/ss-s
 /usr/share/applications/ss-ssh.desktop
 
 %changelog
-* Thu Jan 01 1970 hansen_docked_in <hansdrum@proton.me> - %{version}-1
-- Initial package
+%autochangelog
