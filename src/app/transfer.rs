@@ -14,14 +14,8 @@ use crate::ssh::connect_ssh;
 impl App {
     pub(crate) fn start_upload(&mut self, conn: ConnectionConfig) {
         self.start_transfer(TransferDirection::Upload);
-        if let Ok(start_dir) = crate::app::helpers::resolve_picker_start("") {
-            if let Ok(entries) = crate::app::helpers::read_dir_entries_filtered(&start_dir, false) {
-                self.file_picker = Some(crate::model::FilePickerState {
-                    cwd: start_dir,
-                    entries,
-                    selected: 0,
-                });
-            }
+        if let Err(err) = self.open_local_picker(None, false) {
+            self.set_status(format!("Failed to open local picker: {err}"));
         }
         self.set_status(format!("Select source for {}", conn.label()));
     }

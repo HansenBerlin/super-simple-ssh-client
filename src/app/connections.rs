@@ -284,6 +284,7 @@ impl App {
             host: self.new_connection.host.trim().to_string(),
             auth,
             history: vec![],
+            last_remote_dir: None,
         })
     }
 
@@ -312,6 +313,7 @@ impl App {
         if let Some(index) = self.edit_index {
             if let Some(existing) = self.connections.get(index) {
                 config.history = existing.history.clone();
+                config.last_remote_dir = existing.last_remote_dir.clone();
             }
             self.connections.remove(index);
             self.upsert_connection(config);
@@ -342,8 +344,27 @@ impl App {
                 .iter()
                 .map(|conn| crate::storage::encrypt_connection(conn, &self.master_key))
                 .collect::<Result<Vec<_>>>()?,
+            last_local_dir: self
+                .last_local_dir
+                .as_ref()
+                .map(|value| value.to_string_lossy().into_owned()),
         };
         save_store(&self.config_path, &stored)
+    }
+
+    pub(crate) fn update_last_remote_dir(&mut self, dir: String) -> Result<()> {
+        let Some(conn) = self.selected_connected_connection() else {
+            return Ok(());
+        };
+        if let Some(existing) = self
+            .connections
+            .iter_mut()
+            .find(|candidate| crate::model::same_identity(candidate, &conn))
+        {
+            existing.last_remote_dir = Some(dir);
+            self.save_store()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn history_page_size(&self, has_error: bool) -> usize {

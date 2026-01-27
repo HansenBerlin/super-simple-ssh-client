@@ -6,9 +6,12 @@ Terminal-only SSH client built with `ratatui`. It stores connections securely (m
 
 ### Debian/Ubuntu (deb)
 1. Download the `.deb` from the GitHub release.
+   ```bash
+   wget https://github.com/HansenBerlin/super-simple-ssh-client/releases/download/v0.1.0/super-simple-ssh-client-0.1.0-x86_64.deb
+   ```
 2. Install:
    ```bash
-   sudo apt install ./super-simple-ssh-client_0.1.0_amd64.deb
+   sudo apt install ./super-simple-ssh-client*.deb
    ```
 3. Run:
    ```bash

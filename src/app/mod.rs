@@ -40,6 +40,7 @@ pub(crate) struct App {
     pub(crate) log_path: PathBuf,
     pub(crate) last_log: String,
     pub(crate) log_lines: VecDeque<String>,
+    pub(crate) last_local_dir: Option<PathBuf>,
     pub(crate) master: crate::model::MasterConfig,
     pub(crate) master_key: Vec<u8>,
     pub(crate) connections: Vec<ConnectionConfig>,
@@ -77,7 +78,7 @@ pub(crate) struct App {
 impl App {
     pub(crate) fn load_with_master() -> Result<Self> {
         let config_path = config_path()?;
-        let (master, master_key, connections) = load_or_init_store(&config_path)?;
+        let (master, master_key, connections, last_local_dir) = load_or_init_store(&config_path)?;
         let log_path = log_path()?;
         prune_log_file(&log_path);
         let log_lines = VecDeque::new();
@@ -87,6 +88,7 @@ impl App {
             log_path,
             last_log,
             log_lines,
+            last_local_dir,
             master,
             master_key,
             connections,

@@ -1,5 +1,5 @@
 pkgname=super-simple-ssh-client
-pkgver=0.1.0
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="Super Simple SSH client"
 arch=('x86_64')

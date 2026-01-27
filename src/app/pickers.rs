@@ -23,7 +23,11 @@ impl App {
     pub(crate) fn open_local_picker(&mut self, start: Option<PathBuf>, only_dirs: bool) -> Result<()> {
         let start_dir = match start {
             Some(dir) => dir,
-            None => resolve_picker_start("")?,
+            None => self
+                .last_local_dir
+                .clone()
+                .filter(|dir| dir.is_dir())
+                .unwrap_or_else(|| resolve_picker_start("").unwrap_or_else(|_| PathBuf::from("."))),
         };
         let entries = read_dir_entries_filtered(&start_dir, only_dirs)?;
         self.file_picker = Some(FilePickerState {
@@ -45,7 +49,11 @@ impl App {
 
     pub(crate) fn open_remote_picker(&mut self) -> Result<()> {
         let cwd = if let Some(conn) = self.selected_connected_connection() {
-            format!("/home/{}", conn.user)
+            self.connections
+                .iter()
+                .find(|candidate| crate::model::same_identity(candidate, &conn))
+                .and_then(|candidate| candidate.last_remote_dir.clone())
+                .unwrap_or_else(|| format!("/home/{}", conn.user))
         } else {
             "/".to_string()
         };
@@ -66,11 +74,22 @@ impl App {
             only_dirs,
         });
         if let Err(_err) = self.start_remote_fetch(cwd.clone(), only_dirs) {
-            if let Err(err) = self.start_remote_fetch("/".to_string(), only_dirs) {
+            let mut fallback = None;
+            if let Some(conn) = self.selected_connected_connection() {
+                if let Ok(session) = connect_ssh(&conn) {
+                    if let Ok(home) = crate::ssh::remote_home_dir(&session) {
+                        if !home.trim().is_empty() {
+                            fallback = Some(home);
+                        }
+                    }
+                }
+            }
+            let next = fallback.unwrap_or_else(|| "/".to_string());
+            if let Err(err) = self.start_remote_fetch(next.clone(), only_dirs) {
                 return Err(err);
             }
             if let Some(picker) = &mut self.remote_picker {
-                picker.cwd = "/".to_string();
+                picker.cwd = next;
             }
         }
         Ok(())

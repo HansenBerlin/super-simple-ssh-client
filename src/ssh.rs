@@ -182,6 +182,15 @@ pub(crate) fn remote_size(session: &Session, path: &str, is_dir: bool) -> Result
     walk(&sftp, path)
 }
 
+pub(crate) fn remote_home_dir(session: &Session) -> Result<String> {
+    let mut channel = session.channel_session().context("open channel")?;
+    channel.exec("printf %s \"$HOME\"").context("exec home")?;
+    let mut output = String::new();
+    channel.read_to_string(&mut output).ok();
+    channel.wait_close().ok();
+    Ok(output.trim().to_string())
+}
+
 fn remote_size_via_du(session: &Session, path: &str) -> Result<Option<u64>> {
     let escaped = shell_escape(path);
     let command = format!("du -sb --apparent-size -- {escaped} 2>/dev/null");
