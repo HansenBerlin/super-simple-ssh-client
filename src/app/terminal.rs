@@ -144,7 +144,7 @@ impl App {
             tab.channel
                 .request_pty_size(u32::from(cols), u32::from(rows), None, None)
                 .ok();
-            tab.parser.set_size(rows, cols);
+            tab.parser.screen_mut().set_size(rows, cols);
         }
     }
 

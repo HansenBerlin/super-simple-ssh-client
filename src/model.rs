@@ -220,6 +220,7 @@ pub(crate) struct FilePickerState {
     pub(crate) cwd: PathBuf,
     pub(crate) entries: Vec<FileEntry>,
     pub(crate) selected: usize,
+    pub(crate) show_hidden: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -237,6 +238,7 @@ pub(crate) struct RemotePickerState {
     pub(crate) loading: bool,
     pub(crate) error: Option<String>,
     pub(crate) only_dirs: bool,
+    pub(crate) show_hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
