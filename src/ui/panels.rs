@@ -30,7 +30,10 @@ pub(crate) fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
 
     let items: Vec<ListItem> = if app.connections.is_empty() {
-        vec![ListItem::new("No saved connections")]
+        vec![
+            ListItem::new("No saved connections"),
+            ListItem::new("Press n to add a new connection"),
+        ]
     } else {
         app.connections[start..end]
             .iter()

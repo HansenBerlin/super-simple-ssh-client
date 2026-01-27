@@ -13,6 +13,7 @@ pub(crate) trait SshBackend: Send + Sync {
         conn: &ConnectionConfig,
         cwd: &str,
         only_dirs: bool,
+        show_hidden: bool,
     ) -> Result<Vec<RemoteEntry>>;
     fn remote_home_dir(
         &self,
@@ -52,14 +53,15 @@ impl SshBackend for RealSshBackend {
         conn: &ConnectionConfig,
         cwd: &str,
         only_dirs: bool,
+        show_hidden: bool,
     ) -> Result<Vec<RemoteEntry>> {
         let session = if let Some(session) = self.find_session(open_connections, conn) {
             session
         } else {
             let session = connect_ssh(conn)?;
-            return list_remote_dir_with_session(&session, cwd, only_dirs);
+            return list_remote_dir_with_session(&session, cwd, only_dirs, show_hidden);
         };
-        list_remote_dir_with_session(session, cwd, only_dirs)
+        list_remote_dir_with_session(session, cwd, only_dirs, show_hidden)
     }
 
     fn remote_home_dir(
@@ -105,6 +107,7 @@ fn list_remote_dir_with_session(
     session: &ssh2::Session,
     cwd: &str,
     only_dirs: bool,
+    show_hidden: bool,
 ) -> Result<Vec<RemoteEntry>> {
     let sftp = session.sftp().context("open sftp")?;
     let mut entries = Vec::new();
@@ -114,6 +117,9 @@ fn list_remote_dir_with_session(
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| String::from("/"));
         if name == "." || name == ".." {
+            continue;
+        }
+        if !show_hidden && name.starts_with('.') {
             continue;
         }
         let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
@@ -191,6 +197,7 @@ impl SshBackend for MockSshBackend {
         _conn: &ConnectionConfig,
         cwd: &str,
         _only_dirs: bool,
+        _show_hidden: bool,
     ) -> Result<Vec<RemoteEntry>> {
         if let Some(err) = self.list_errors.lock().unwrap().get(cwd) {
             return Err(anyhow::anyhow!(err.clone()));

@@ -22,13 +22,20 @@ pub(crate) fn resolve_picker_start(current: &str) -> Result<PathBuf> {
     std::env::current_dir().context("current dir")
 }
 
-pub(crate) fn read_dir_entries_filtered(dir: &Path, only_dirs: bool) -> Result<Vec<FileEntry>> {
+pub(crate) fn read_dir_entries_filtered(
+    dir: &Path,
+    only_dirs: bool,
+    show_hidden: bool,
+) -> Result<Vec<FileEntry>> {
     let mut entries = Vec::new();
     for entry in fs::read_dir(dir).context("read dir")? {
         let entry = entry.context("read dir entry")?;
         let path = entry.path();
         let file_type = entry.file_type().context("read file type")?;
         let name = entry.file_name().to_string_lossy().into_owned();
+        if !show_hidden && name.starts_with('.') {
+            continue;
+        }
         if only_dirs && !file_type.is_dir() {
             continue;
         }
@@ -99,14 +106,14 @@ mod tests {
         fs::create_dir_all(&dir_path).unwrap();
         fs::write(&file_path, b"x").unwrap();
 
-        let entries = read_dir_entries_filtered(&root, false).unwrap();
+        let entries = read_dir_entries_filtered(&root, false, false).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "a-dir");
         assert!(entries[0].is_dir);
         assert_eq!(entries[1].name, "b.txt");
         assert!(!entries[1].is_dir);
 
-        let dirs_only = read_dir_entries_filtered(&root, true).unwrap();
+        let dirs_only = read_dir_entries_filtered(&root, true, false).unwrap();
         assert_eq!(dirs_only.len(), 1);
         assert_eq!(dirs_only[0].name, "a-dir");
         assert!(dirs_only[0].is_dir);

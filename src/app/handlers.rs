@@ -403,9 +403,19 @@ impl App {
                         picker.entries = crate::app::helpers::read_dir_entries_filtered(
                             &picker.cwd,
                             only_dirs,
+                            picker.show_hidden,
                         )?;
                         picker.selected = 0;
                     }
+                }
+                KeyCode::Char('h') => {
+                    picker.show_hidden = !picker.show_hidden;
+                    picker.entries = crate::app::helpers::read_dir_entries_filtered(
+                        &picker.cwd,
+                        only_dirs,
+                        picker.show_hidden,
+                    )?;
+                    picker.selected = 0;
                 }
                 KeyCode::Enter => {
                     if let Some(entry) = picker.entries.get(picker.selected).cloned() {
@@ -414,6 +424,7 @@ impl App {
                                 let subdirectories = crate::app::helpers::read_dir_entries_filtered(
                                     &entry.path,
                                     true,
+                                    picker.show_hidden,
                                 )?;
                                 if subdirectories.is_empty() {
                                     self.notice = Some(Notice {
@@ -427,6 +438,7 @@ impl App {
                             picker.entries = crate::app::helpers::read_dir_entries_filtered(
                                 &picker.cwd,
                                 only_dirs,
+                                picker.show_hidden,
                             )?;
                             picker.selected = 0;
                         } else if let Some((direction, step)) = transfer_mode {
@@ -528,6 +540,17 @@ impl App {
                     self.load_remote_dir(new_cwd, only_dirs)?;
                     return Ok(false);
                 }
+            }
+            KeyCode::Char('h') => {
+                picker.show_hidden = !picker.show_hidden;
+                picker.entries.clear();
+                picker.selected = 0;
+                picker.loading = true;
+                picker.error = None;
+                let cwd = picker.cwd.clone();
+                self.remote_picker = Some(picker);
+                self.load_remote_dir(cwd, only_dirs)?;
+                return Ok(false);
             }
             KeyCode::Enter => {
                 if let Some(entry) = picker.entries.get(picker.selected).cloned() {
@@ -901,6 +924,7 @@ mod tests {
             loading: false,
             error: None,
             only_dirs: true,
+            show_hidden: false,
         });
 
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);

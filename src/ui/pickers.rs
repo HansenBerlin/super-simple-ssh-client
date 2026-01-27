@@ -23,24 +23,24 @@ pub(crate) fn draw_file_picker_modal(frame: &mut Frame<'_>, app: &App) {
             (TransferDirection::Upload, crate::model::TransferStep::PickSource) => (
                 "Pick file or folder on THIS host to upload",
                 Style::default().fg(Color::White),
-                "Enter to open, S to select folder, Backspace to up, Esc to cancel",
+                "Enter to open, S to select folder, H to toggle hidden, Backspace to up, Esc to cancel",
             ),
             (TransferDirection::Download, crate::model::TransferStep::PickTarget) => (
                 "Pick target folder",
                 Style::default().fg(Color::White),
-                "Enter to open, S to select folder, B to go back to source, Backspace to up, Esc to cancel",
+                "Enter to open, S to select folder, H to toggle hidden, B to go back to source, Backspace to up, Esc to cancel",
             ),
             _ => (
                 "Pick key file",
                 Style::default(),
-                "Enter to open/select, Backspace to up, Esc to cancel",
+                "Enter to open/select, H to toggle hidden, Backspace to up, Esc to cancel",
             ),
         }
     } else {
         (
             "Pick key file",
             Style::default(),
-            "Enter to open/select, Backspace to up, Esc to cancel",
+            "Enter to open/select, H to toggle hidden, Backspace to up, Esc to cancel",
         )
     };
     let inner = draw_popup_frame(frame, area, title, border_style);
@@ -133,24 +133,24 @@ pub(crate) fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
             (TransferDirection::Download, crate::model::TransferStep::PickSource) => (
                 "Pick remote source",
                 Style::default().fg(Color::Green),
-                "Enter to open, S to select folder, Backspace to up, Esc to cancel",
+                "Enter to open, S to select folder, H to toggle hidden, Backspace to up, Esc to cancel",
             ),
             (TransferDirection::Upload, crate::model::TransferStep::PickTarget) => (
                 "Pick where to save the file or folder on the REMOTE host",
                 Style::default().fg(Color::Green),
-                "Enter to open, S to select folder, B to go back to source, Backspace to up, Esc to cancel",
+                "Enter to open, S to select folder, H to toggle hidden, B to go back to source, Backspace to up, Esc to cancel",
             ),
             _ => (
                 "Pick remote target",
                 Style::default(),
-                "Enter to open, S to select folder, Backspace to up, Esc to cancel",
+                "Enter to open, S to select folder, H to toggle hidden, Backspace to up, Esc to cancel",
             ),
         }
     } else {
         (
             "Pick remote target",
             Style::default(),
-            "Enter to open, S to select folder, Backspace to up, Esc to cancel",
+            "Enter to open, S to select folder, H to toggle hidden, Backspace to up, Esc to cancel",
         )
     };
     let inner = draw_popup_frame(frame, area, title, border_style);
@@ -233,6 +233,7 @@ mod tests {
                 },
             ],
             selected: 0,
+            show_hidden: false,
         });
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -255,6 +256,7 @@ mod tests {
             loading: false,
             error: None,
             only_dirs: true,
+            show_hidden: false,
         });
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();

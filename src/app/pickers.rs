@@ -10,11 +10,12 @@ use crate::model::{AuthConfig, FilePickerState, KeyPickerState, RemoteEntry, Rem
 impl App {
     pub(crate) fn open_file_picker(&mut self) -> Result<()> {
         let start_dir = resolve_picker_start(&self.new_connection.key_path)?;
-        let entries = read_dir_entries_filtered(&start_dir, false)?;
+        let entries = read_dir_entries_filtered(&start_dir, false, false)?;
         self.file_picker = Some(FilePickerState {
             cwd: start_dir,
             entries,
             selected: 0,
+            show_hidden: false,
         });
         Ok(())
     }
@@ -28,11 +29,12 @@ impl App {
                 .filter(|dir| dir.is_dir())
                 .unwrap_or_else(|| resolve_picker_start("").unwrap_or_else(|_| PathBuf::from("."))),
         };
-        let entries = read_dir_entries_filtered(&start_dir, only_dirs)?;
+        let entries = read_dir_entries_filtered(&start_dir, only_dirs, false)?;
         self.file_picker = Some(FilePickerState {
             cwd: start_dir,
             entries,
             selected: 0,
+            show_hidden: false,
         });
         Ok(())
     }
@@ -71,6 +73,7 @@ impl App {
             loading: true,
             error: None,
             only_dirs,
+            show_hidden: false,
         });
         if self.try_load_remote_dir(cwd.clone(), only_dirs).is_ok() {
             return Ok(());
@@ -132,11 +135,16 @@ impl App {
         let Some(conn) = self.selected_connected_connection() else {
             anyhow::bail!("Selected connection is not connected");
         };
+        let show_hidden = self
+            .remote_picker
+            .as_ref()
+            .map(|picker| picker.show_hidden)
+            .unwrap_or(false);
         let (tx, rx) = mpsc::channel();
         let backend = self.ssh_backend.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<Vec<RemoteEntry>> {
-                backend.list_remote_dir(None, &conn, &cwd, only_dirs)
+                backend.list_remote_dir(None, &conn, &cwd, only_dirs, show_hidden)
             })();
             let _ = tx.send(result);
         });
@@ -189,9 +197,20 @@ impl App {
         let Some(conn) = self.selected_connected_connection() else {
             anyhow::bail!("Selected connection is not connected");
         };
+        let show_hidden = self
+            .remote_picker
+            .as_ref()
+            .map(|picker| picker.show_hidden)
+            .unwrap_or(false);
         let entries = self
             .ssh_backend
-            .list_remote_dir(Some(&self.open_connections), &conn, &cwd, only_dirs)?;
+            .list_remote_dir(
+                Some(&self.open_connections),
+                &conn,
+                &cwd,
+                only_dirs,
+                show_hidden,
+            )?;
         if let Some(picker) = &mut self.remote_picker {
             picker.entries = entries;
             picker.loading = false;
