@@ -190,7 +190,7 @@ jobs:
         run: |
           git clone https://github.com/microsoft/vcpkg vcpkg
           ./vcpkg/bootstrap-vcpkg.sh
-          ./vcpkg/vcpkg install libssh2 openssl zlib --triplet x64-mingw-dynamic
+          ./vcpkg/vcpkg install --triplet x64-mingw-dynamic
       - name: Build Windows (GNU)
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
