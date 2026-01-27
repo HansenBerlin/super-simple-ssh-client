@@ -16,6 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Sync version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD
+      - name: Update lockfile for tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cargo generate-lockfile
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config cmake
       - name: Test
@@ -41,6 +50,9 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD
+      - name: Update lockfile for tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cargo generate-lockfile
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config cmake
       - name: Build
@@ -68,6 +80,9 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/arch/PKGBUILD
+      - name: Update lockfile for tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cargo generate-lockfile
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config cmake
       - name: Install cargo-deb
@@ -95,6 +110,9 @@ jobs:
       - name: Install build dependencies
         run: |
           dnf install -y git rust cargo gcc make openssl-devel libssh2-devel zlib-devel rpm-build pkgconf-pkg-config
+      - name: Update lockfile for tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cargo generate-lockfile
       - name: Build rpm
         run: |
           VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
@@ -128,6 +146,9 @@ jobs:
       - name: Install toolchain
         run: |
           pacman -Sy --noconfirm --needed base-devel git rust cargo openssl libssh2 zlib pkgconf cmake
+      - name: Update lockfile for tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cargo generate-lockfile
       - name: Build package
         run: |
           VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
