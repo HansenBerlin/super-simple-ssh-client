@@ -1,7 +1,6 @@
 {
   "name": "super-simple-ssh-client",
   "version-string": "0.1.0",
-  "builtin-baseline": "7c3de83f6f0d5f6b2c33f2b6b9ad8c4d0b8b57f3",
   "dependencies": [
     "libssh2",
     "openssl",
