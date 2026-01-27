@@ -187,9 +187,8 @@ jobs:
         with:
           vcpkgDirectory: ${{ runner.temp }}/vcpkg
           vcpkgGitCommitId: "2024.01.12"
-          vcpkgJsonGlob: ""
           runVcpkgInstall: true
-          vcpkgArguments: "libssh2 openssl zlib"
+          vcpkgJsonGlob: "vcpkg.json"
       - name: Build
         env:
           VCPKG_ROOT: ${{ runner.temp }}/vcpkg
