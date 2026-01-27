@@ -345,3 +345,25 @@ pub(crate) fn terminal_key_bytes(key: KeyEvent) -> Option<Vec<u8>> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn terminal_key_bytes_basic() {
+        let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+        assert_eq!(terminal_key_bytes(key), Some(b"a".to_vec()));
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(terminal_key_bytes(key), Some(vec![b'\r']));
+        let key = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+        assert_eq!(terminal_key_bytes(key), Some(b"\x1b[A".to_vec()));
+    }
+
+    #[test]
+    fn terminal_key_bytes_ctrl() {
+        let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(terminal_key_bytes(key), Some(vec![0x03]));
+    }
+}

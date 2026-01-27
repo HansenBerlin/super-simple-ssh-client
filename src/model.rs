@@ -339,3 +339,96 @@ where
             .collect()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn label_prefers_name_over_host() {
+        let mut conn = ConnectionConfig {
+            name: String::new(),
+            user: "u".to_string(),
+            host: "host".to_string(),
+            auth: AuthConfig::Password {
+                password: "pw".to_string(),
+            },
+            history: vec![],
+            last_remote_dir: None,
+        };
+        assert_eq!(conn.label(), "host");
+        conn.name = "friendly".to_string();
+        assert_eq!(conn.label(), "friendly");
+    }
+
+    #[test]
+    fn same_identity_matches_auth_type() {
+        let base = ConnectionConfig {
+            name: String::new(),
+            user: "u".to_string(),
+            host: "h".to_string(),
+            auth: AuthConfig::Password {
+                password: "pw".to_string(),
+            },
+            history: vec![],
+            last_remote_dir: None,
+        };
+        let other = ConnectionConfig {
+            auth: AuthConfig::PrivateKey {
+                path: "/k".to_string(),
+                password: None,
+            },
+            ..base.clone()
+        };
+        assert!(!same_identity(&base, &other));
+        let other_pw = ConnectionConfig {
+            auth: AuthConfig::Password {
+                password: "pw2".to_string(),
+            },
+            ..base.clone()
+        };
+        assert!(same_identity(&base, &other_pw));
+    }
+
+    #[test]
+    fn connection_key_includes_auth_hint() {
+        let conn = ConnectionConfig {
+            name: String::new(),
+            user: "u".to_string(),
+            host: "h".to_string(),
+            auth: AuthConfig::Password {
+                password: "pw".to_string(),
+            },
+            history: vec![],
+            last_remote_dir: None,
+        };
+        assert!(connection_key(&conn).contains("u@h|pw"));
+    }
+
+    #[test]
+    fn deserialize_history_accepts_timestamps() {
+        let json = r#"
+        {
+          "name": "",
+          "user": "u",
+          "host": "h",
+          "auth": { "Password": { "password": { "nonce": "a", "ciphertext": "b" } } },
+          "history": [1,2]
+        }
+        "#;
+        let stored: StoredConnection = serde_json::from_str(json).unwrap();
+        assert_eq!(stored.history.len(), 2);
+        assert!(matches!(stored.history[0].state, HistoryState::Success));
+    }
+
+    #[test]
+    fn format_history_entry_includes_state() {
+        let entry = HistoryEntry {
+            ts: 0,
+            state: HistoryState::Failure,
+        };
+        let formatted = format_history_entry(&entry);
+        assert!(formatted.contains("failed"));
+        assert!(formatted.contains(" | "));
+    }
+}

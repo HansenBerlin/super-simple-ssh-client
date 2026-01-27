@@ -260,3 +260,58 @@ pub(crate) fn list_state(selected: usize, len: usize) -> ratatui::widgets::ListS
     }
     state
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_text_handles_edges() {
+        assert_eq!(truncate_text("abc", 0), "");
+        assert_eq!(truncate_text("abc", 2), "ab");
+        assert_eq!(truncate_text("abcd", 3), "abc");
+        assert_eq!(truncate_text("abcdef", 4), "a...");
+        assert_eq!(truncate_text("short", 10), "short");
+    }
+
+    #[test]
+    fn format_bytes_scales_units() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+    }
+
+    #[test]
+    fn auth_kind_label_matches_variants() {
+        assert_eq!(auth_kind_label(AuthKind::PasswordOnly), "Password only");
+        assert_eq!(auth_kind_label(AuthKind::PrivateKey), "Private key");
+        assert_eq!(
+            auth_kind_label(AuthKind::PrivateKeyWithPassword),
+            "Private key + password"
+        );
+    }
+
+    #[test]
+    fn list_state_clamps_selection() {
+        let state = list_state(5, 0);
+        assert!(state.selected().is_none());
+        let state = list_state(5, 3);
+        assert_eq!(state.selected(), Some(2));
+    }
+
+    #[test]
+    fn centered_rect_abs_clamps_to_area() {
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 5,
+        };
+        let rect = centered_rect_abs(100, 100, area);
+        assert_eq!(rect.width, 10);
+        assert_eq!(rect.height, 5);
+        assert_eq!(rect.x, 0);
+        assert_eq!(rect.y, 0);
+    }
+}

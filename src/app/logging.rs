@@ -67,3 +67,34 @@ pub(crate) fn prune_log_file(path: &Path) {
         let _ = fs::write(path, kept.join("\n") + "\n");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_log_path() -> std::path::PathBuf {
+        let mut base = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        base.push(format!("ssh-client-log-test-{nanos}.log"));
+        base
+    }
+
+    #[test]
+    fn prune_log_file_removes_old_entries() {
+        let path = temp_log_path();
+        let now = chrono::Local::now().naive_local();
+        let old = now - chrono::Duration::days(LOG_RETENTION_DAYS + 1);
+        let recent = now - chrono::Duration::days(1);
+        let old_line = format!("{}{}old", old.format(LOG_TIMESTAMP_FORMAT), LOG_SEPARATOR);
+        let recent_line = format!("{}{}recent", recent.format(LOG_TIMESTAMP_FORMAT), LOG_SEPARATOR);
+        fs::write(&path, format!("{old_line}\n{recent_line}\n")).unwrap();
+        prune_log_file(&path);
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(!content.contains("old"));
+        assert!(content.contains("recent"));
+    }
+}

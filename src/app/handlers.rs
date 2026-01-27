@@ -538,20 +538,14 @@ impl App {
                                 self.remote_picker = Some(picker);
                                 return Ok(false);
                             };
-                            let open_conn = match self.open_connections.iter().find(|candidate| {
-                                crate::model::same_identity(&candidate.config, &conn)
-                            }) {
-                                Some(conn) => conn,
-                                None => {
-                                    self.set_status(NOT_CONNECTED_MESSAGE);
-                                    self.remote_picker = Some(picker);
-                                    return Ok(false);
-                                }
-                            };
-                            if !crate::ssh::remote_has_subdirectories(
-                                &open_conn.session,
-                                &entry.path,
-                            )? {
+                            if !self
+                                .ssh_backend
+                                .remote_has_subdirectories(
+                                    Some(&self.open_connections),
+                                    &conn,
+                                    &entry.path,
+                                )?
+                            {
                                 self.notice = Some(Notice {
                                     title: NOTICE_NO_SUBFOLDERS_TITLE.to_string(),
                                     message: NOTICE_NO_SUBFOLDERS_MESSAGE.to_string(),
@@ -818,6 +812,100 @@ impl App {
         self.master_key = new_key;
         self.master_change = crate::model::MasterPasswordState::default();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crate::app::ssh_backend::MockSshBackend;
+    use crate::model::{AuthConfig, ConnectionConfig, OpenConnection, RemoteEntry, RemotePickerState};
+    use std::sync::Arc;
+    use std::time::SystemTime;
+
+    #[test]
+    fn handle_normal_key_cycles_header() {
+        let mut app = App::for_test();
+        assert!(matches!(app.header_mode, crate::app::HeaderMode::Help));
+        let key = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE);
+        app.handle_key(key).unwrap();
+        assert!(matches!(app.header_mode, crate::app::HeaderMode::Logs));
+    }
+
+    #[test]
+    fn handle_normal_key_new_connection() {
+        let mut app = App::for_test();
+        let key = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE);
+        let should_quit = app.handle_key(key).unwrap();
+        assert!(!should_quit);
+        assert!(matches!(app.mode, Mode::NewConnection));
+        assert!(app.edit_index.is_none());
+    }
+
+    #[test]
+    fn handle_normal_key_quit() {
+        let mut app = App::for_test();
+        let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        let should_quit = app.handle_key(key).unwrap();
+        assert!(should_quit);
+    }
+
+    #[test]
+    fn handle_terminal_notice_when_not_connected() {
+        let mut app = App::for_test();
+        let key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+        app.handle_key(key).unwrap();
+        assert!(app.notice.is_some());
+        assert!(matches!(app.notice_action, Some(NoticeAction::ConnectTerminal)));
+    }
+
+    #[test]
+    fn handle_connect_without_selection_sets_status() {
+        let mut app = App::for_test();
+        let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
+        app.handle_key(key).unwrap();
+        assert_eq!(app.status, "No saved connection selected");
+    }
+
+    #[test]
+    fn remote_picker_notice_on_leaf_dir() {
+        let backend = Arc::new(MockSshBackend::default());
+        backend.set_has_subdirs(false);
+        let mut app = App::for_test_with_backend(backend);
+        let connection = ConnectionConfig {
+            name: "test".to_string(),
+            user: "user".to_string(),
+            host: "host".to_string(),
+            auth: AuthConfig::Password {
+                password: "pw".to_string(),
+            },
+            history: vec![],
+            last_remote_dir: None,
+        };
+        app.connections.push(connection.clone());
+        app.open_connections.push(OpenConnection {
+            config: connection,
+            session: ssh2::Session::new().unwrap(),
+            connected_at: SystemTime::now(),
+        });
+        app.selected_saved = 0;
+        app.remote_picker = Some(RemotePickerState {
+            cwd: "/".to_string(),
+            entries: vec![RemoteEntry {
+                name: "leaf".to_string(),
+                path: "/leaf".to_string(),
+                is_dir: true,
+            }],
+            selected: 0,
+            loading: false,
+            error: None,
+            only_dirs: true,
+        });
+
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        app.handle_remote_picker_key(key).unwrap();
+        assert!(app.notice.is_some());
     }
 }
 
