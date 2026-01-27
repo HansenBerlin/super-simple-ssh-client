@@ -1,9 +1,0 @@
-{
-  "name": "super-simple-ssh-client",
-  "version-string": "0.1.0",
-  "dependencies": [
-    "libssh2",
-    "openssl",
-    "zlib"
-  ]
-}
