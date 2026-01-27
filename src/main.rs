@@ -21,7 +21,7 @@ use app::App;
 use model::AppAction;
 use ui::constants::{HEADER_HEIGHT, TERMINAL_FOOTER_HEIGHT};
 
-const TICK_RATE: Duration = Duration::from_millis(150);
+const TICK_RATE: Duration = Duration::from_millis(33);
 
 fn main() -> Result<()> {
     let mut app = App::load_with_master()?;

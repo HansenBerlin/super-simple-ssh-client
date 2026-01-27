@@ -214,8 +214,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           vpk pack -u super-simple-ssh-client -v "$VERSION" \
-            -p target/x86_64-pc-windows-gnu/release -e ss-ssh.exe -o dist \
-            --target win-x64
+            -p target/x86_64-pc-windows-gnu/release -e ss-ssh.exe -o dist
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x86_64

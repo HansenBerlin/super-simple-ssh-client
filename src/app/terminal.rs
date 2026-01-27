@@ -15,6 +15,7 @@ pub(crate) struct TerminalTab {
     pub(crate) parser: vt100::Parser,
     pub(crate) cols: u16,
     pub(crate) rows: u16,
+    pub(crate) pending_write: Vec<u8>,
 }
 
 impl App {
@@ -41,6 +42,7 @@ impl App {
             parser,
             cols: cols.max(1),
             rows: rows.max(1),
+            pending_write: Vec::new(),
         };
         self.terminal_tabs.push(tab);
         self.active_terminal_tab = self.terminal_tabs.len();
@@ -78,8 +80,7 @@ impl App {
                 .terminal_tabs
                 .get_mut(self.active_terminal_tab.saturating_sub(1))
             {
-                tab.channel.write_all(&bytes).ok();
-                tab.channel.flush().ok();
+                tab.pending_write.extend_from_slice(&bytes);
             }
         }
         Ok(true)
@@ -90,6 +91,19 @@ impl App {
         let mut err_buffer = [0u8; 1024];
         let mut closed = Vec::new();
         for (index, tab) in self.terminal_tabs.iter_mut().enumerate() {
+            if !tab.pending_write.is_empty() {
+                match tab.channel.write(&tab.pending_write) {
+                    Ok(0) => {}
+                    Ok(count) => {
+                        tab.pending_write.drain(0..count);
+                    }
+                    Err(err) => {
+                        if err.kind() != std::io::ErrorKind::WouldBlock {
+                            closed.push(index);
+                        }
+                    }
+                }
+            }
             loop {
                 match tab.channel.read(&mut buffer) {
                     Ok(0) => break,
