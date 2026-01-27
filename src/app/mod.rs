@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
 use anyhow::Result;
 
@@ -19,6 +19,7 @@ mod handlers;
 mod helpers;
 mod logging;
 mod pickers;
+mod ssh_backend;
 mod terminal;
 mod transfer;
 
@@ -76,6 +77,7 @@ pub(crate) struct App {
     pub(crate) size_calc_generation: u64,
     pub(crate) terminal_tabs: Vec<crate::app::terminal::TerminalTab>,
     pub(crate) active_terminal_tab: usize,
+    pub(crate) ssh_backend: Arc<dyn crate::app::ssh_backend::SshBackend>,
 }
 
 impl App {
@@ -126,6 +128,7 @@ impl App {
             size_calc_generation: 0,
             terminal_tabs: vec![],
             active_terminal_tab: 0,
+            ssh_backend: Arc::new(crate::app::ssh_backend::RealSshBackend::default()),
         };
         app.sort_connections_by_recent(None);
         app.set_status(STATUS_READY);
@@ -134,5 +137,66 @@ impl App {
 
     pub(crate) fn set_details_height(&mut self, height: u16) {
         self.details_height = height;
+    }
+}
+
+#[cfg(test)]
+impl App {
+    pub(crate) fn for_test() -> Self {
+        let backend = Arc::new(crate::app::ssh_backend::MockSshBackend::default());
+        Self::for_test_with_backend(backend)
+    }
+
+    pub(crate) fn for_test_with_backend(
+        ssh_backend: Arc<dyn crate::app::ssh_backend::SshBackend>,
+    ) -> Self {
+        let (master, master_key) = crate::storage::create_master_from_password("test-password")
+            .expect("create master key");
+        let mut config_path = std::env::temp_dir();
+        config_path.push("ssh-client-test-config.json");
+        let mut log_path = std::env::temp_dir();
+        log_path.push("ssh-client-test.log");
+        Self {
+            config_path,
+            log_path,
+            last_log: crate::app::constants::LOG_NO_LOGS_MESSAGE.to_string(),
+            log_lines: std::collections::VecDeque::new(),
+            master,
+            master_key,
+            connections: vec![],
+            selected_saved: 0,
+            selected_tab: 0,
+            open_connections: vec![],
+            mode: crate::model::Mode::Normal,
+            new_connection: crate::model::NewConnectionState::default(),
+            master_change: crate::model::MasterPasswordState::default(),
+            status: crate::app::constants::STATUS_READY.to_string(),
+            file_picker: None,
+            key_picker: None,
+            pending_action: None,
+            last_error: std::collections::HashMap::new(),
+            edit_index: None,
+            delete_index: None,
+            try_result: None,
+            new_connection_feedback: None,
+            notice: None,
+            notice_action: None,
+            header_mode: HeaderMode::Help,
+            history_page: 0,
+            details_height: 0,
+            transfer: None,
+            remote_picker: None,
+            remote_fetch: None,
+            transfer_progress: None,
+            transfer_cancel: None,
+            transfer_hidden: false,
+            transfer_last_logged: 0,
+            size_calc_rx: None,
+            size_calc_generation: 0,
+            terminal_tabs: vec![],
+            active_terminal_tab: 0,
+            last_local_dir: None,
+            ssh_backend,
+        }
     }
 }

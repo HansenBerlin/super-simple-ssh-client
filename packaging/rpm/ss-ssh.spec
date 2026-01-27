@@ -24,7 +24,7 @@ Terminal SSH client with a ratatui interface.
 %autosetup -n %{name}-%{version}
 
 %build
-cargo build --release --locked
+cargo build --release --offline
 
 %install
 install -Dm755 target/release/ss-ssh %{buildroot}/usr/bin/ss-ssh

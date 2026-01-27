@@ -1,12 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::app::helpers::{read_dir_entries_filtered, resolve_picker_start};
 use crate::app::App;
 use crate::model::{AuthConfig, FilePickerState, KeyPickerState, RemoteEntry, RemotePickerState};
-use crate::ssh::connect_ssh;
 
 impl App {
     pub(crate) fn open_file_picker(&mut self) -> Result<()> {
@@ -134,36 +133,10 @@ impl App {
             anyhow::bail!("Selected connection is not connected");
         };
         let (tx, rx) = mpsc::channel();
+        let backend = self.ssh_backend.clone();
         std::thread::spawn(move || {
             let result = (|| -> Result<Vec<RemoteEntry>> {
-                let session = connect_ssh(&conn)?;
-                let sftp = session.sftp().context("open sftp")?;
-                let mut entries = Vec::new();
-                for (path, stat) in sftp.readdir(Path::new(&cwd)).context("read remote dir")? {
-                    let name = path
-                        .file_name()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| String::from("/"));
-                    if name == "." || name == ".." {
-                        continue;
-                    }
-                    let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
-                    if only_dirs && !is_dir {
-                        continue;
-                    }
-                    let full = if cwd == "/" {
-                        format!("/{name}")
-                    } else {
-                        format!("{cwd}/{name}")
-                    };
-                    entries.push(RemoteEntry {
-                        name,
-                        path: full,
-                        is_dir,
-                    });
-                }
-                entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-                Ok(entries)
+                backend.list_remote_dir(None, &conn, &cwd, only_dirs)
             })();
             let _ = tx.send(result);
         });
@@ -216,37 +189,9 @@ impl App {
         let Some(conn) = self.selected_connected_connection() else {
             anyhow::bail!("Selected connection is not connected");
         };
-        let open_conn = self
-            .open_connections
-            .iter()
-            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
-            .ok_or_else(|| anyhow::anyhow!("Selected connection is not connected"))?;
-        let sftp = open_conn.session.sftp().context("open sftp")?;
-        let mut entries = Vec::new();
-        for (path, stat) in sftp.readdir(Path::new(&cwd)).context("read remote dir")? {
-            let name = path
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| String::from("/"));
-            if name == "." || name == ".." {
-                continue;
-            }
-            let is_dir = stat.perm.unwrap_or(0) & 0o040000 != 0;
-            if only_dirs && !is_dir {
-                continue;
-            }
-            let full = if cwd == "/" {
-                format!("/{name}")
-            } else {
-                format!("{cwd}/{name}")
-            };
-            entries.push(RemoteEntry {
-                name,
-                path: full,
-                is_dir,
-            });
-        }
-        entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        let entries = self
+            .ssh_backend
+            .list_remote_dir(Some(&self.open_connections), &conn, &cwd, only_dirs)?;
         if let Some(picker) = &mut self.remote_picker {
             picker.entries = entries;
             picker.loading = false;
@@ -257,13 +202,73 @@ impl App {
 
     fn remote_home_fallback(&self) -> Option<String> {
         let conn = self.selected_connected_connection()?;
-        let session = connect_ssh(&conn).ok()?;
-        let home = crate::ssh::remote_home_dir(&session).ok()?;
+        let home = self
+            .ssh_backend
+            .remote_home_dir(Some(&self.open_connections), &conn)
+            .ok()
+            .flatten()?;
         let trimmed = home.trim();
         if trimmed.is_empty() {
             None
         } else {
             Some(trimmed.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::ssh_backend::MockSshBackend;
+    use crate::model::{AuthConfig, ConnectionConfig, OpenConnection, RemoteEntry};
+    use std::sync::Arc;
+    use std::time::SystemTime;
+
+    #[test]
+    fn open_local_picker_uses_last_dir() {
+        let mut app = App::for_test();
+        let temp = std::env::temp_dir();
+        app.last_local_dir = Some(temp.clone());
+        app.open_local_picker(None, false).unwrap();
+        let picker = app.file_picker.as_ref().unwrap();
+        assert_eq!(picker.cwd, temp);
+    }
+
+    #[test]
+    fn open_remote_picker_falls_back_to_home() {
+        let backend = Arc::new(MockSshBackend::default());
+        backend.set_list("/home/root", Err(anyhow::anyhow!("missing")));
+        backend.set_list(
+            "/home/user",
+            Ok(vec![RemoteEntry {
+                name: "etc".to_string(),
+                path: "/home/user/etc".to_string(),
+                is_dir: true,
+            }]),
+        );
+        backend.set_home(Some("/home/user".to_string()));
+
+        let mut app = App::for_test_with_backend(backend);
+        let connection = ConnectionConfig {
+            name: "test".to_string(),
+            user: "root".to_string(),
+            host: "host".to_string(),
+            auth: AuthConfig::Password {
+                password: "pw".to_string(),
+            },
+            history: vec![],
+            last_remote_dir: None,
+        };
+        app.connections.push(connection.clone());
+        app.open_connections.push(OpenConnection {
+            config: connection,
+            session: ssh2::Session::new().unwrap(),
+            connected_at: SystemTime::now(),
+        });
+        app.selected_saved = 0;
+        app.open_remote_picker_at("/home/root".to_string(), false).unwrap();
+        app.poll_remote_fetch();
+        let picker = app.remote_picker.as_ref().unwrap();
+        assert_eq!(picker.cwd, "/home/user");
     }
 }

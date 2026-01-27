@@ -565,3 +565,47 @@ pub(crate) fn draw_notice_modal(frame: &mut Frame<'_>, app: &App) {
     };
     frame.render_widget(footer, layout[1]);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+    use crate::model::{Mode, TransferDirection, TransferState, TransferStep};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn draw_new_connection_modal_smoke() {
+        let mut app = App::for_test();
+        app.mode = Mode::NewConnection;
+        app.new_connection.name = "name".to_string();
+        app.new_connection.user = "user".to_string();
+        app.new_connection.host = "host".to_string();
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_new_connection_modal(frame, &app))
+            .unwrap();
+    }
+
+    #[test]
+    fn draw_transfer_confirm_modal_smoke() {
+        let mut app = App::for_test();
+        app.transfer = Some(TransferState {
+            direction: TransferDirection::Upload,
+            step: TransferStep::Confirm,
+            source_path: Some(std::path::PathBuf::from("/tmp/a.txt")),
+            source_remote: None,
+            source_is_dir: false,
+            target_dir: Some("/tmp".to_string()),
+            target_local_dir: None,
+            size_bytes: Some(123),
+            progress_bytes: 0,
+        });
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_transfer_confirm_modal(frame, &app))
+            .unwrap();
+    }
+}

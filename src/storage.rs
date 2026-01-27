@@ -219,3 +219,52 @@ pub(crate) fn decrypt_connection(conn: StoredConnection, key: &[u8]) -> Result<C
         last_remote_dir: conn.last_remote_dir,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::AuthConfig;
+
+    #[test]
+    fn encrypt_and_decrypt_roundtrip() {
+        let (master, key) = create_master_from_password("test-password").unwrap();
+        let text = "secret";
+        let blob = encrypt_string(text, &key).unwrap();
+        let decrypted = decrypt_string(&blob, &key).unwrap();
+        assert_eq!(decrypted, text);
+        assert!(!master.salt_b64.is_empty());
+    }
+
+    #[test]
+    fn connection_roundtrip_preserves_fields() {
+        let (_master, key) = create_master_from_password("test-password").unwrap();
+        let conn = ConnectionConfig {
+            name: "name".to_string(),
+            user: "user".to_string(),
+            host: "host".to_string(),
+            auth: AuthConfig::PrivateKey {
+                path: "/key".to_string(),
+                password: Some("pw".to_string()),
+            },
+            history: vec![crate::model::HistoryEntry {
+                ts: 1,
+                state: crate::model::HistoryState::Success,
+            }],
+            last_remote_dir: Some("/home/user".to_string()),
+        };
+        let stored = encrypt_connection(&conn, &key).unwrap();
+        let decoded = decrypt_connection(stored, &key).unwrap();
+        assert_eq!(decoded.name, "name");
+        assert_eq!(decoded.user, "user");
+        assert_eq!(decoded.host, "host");
+        assert_eq!(decoded.history.len(), 1);
+        assert_eq!(decoded.last_remote_dir.as_deref(), Some("/home/user"));
+        match decoded.auth {
+            AuthConfig::PrivateKey { path, password } => {
+                assert_eq!(path, "/key");
+                assert_eq!(password.as_deref(), Some("pw"));
+            }
+            _ => panic!("expected private key auth"),
+        }
+    }
+}

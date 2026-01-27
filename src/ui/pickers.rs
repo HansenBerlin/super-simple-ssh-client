@@ -206,3 +206,60 @@ pub(crate) fn draw_remote_picker_modal(frame: &mut Frame<'_>, app: &App) {
         .block(ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::TOP));
     frame.render_widget(footer, layout[2]);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+    use crate::model::{FileEntry, FilePickerState, RemoteEntry, RemotePickerState};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn draw_file_picker_modal_smoke() {
+        let mut app = App::for_test();
+        app.file_picker = Some(FilePickerState {
+            cwd: std::env::temp_dir(),
+            entries: vec![
+                FileEntry {
+                    name: "a.txt".to_string(),
+                    path: std::env::temp_dir().join("a.txt"),
+                    is_dir: false,
+                },
+                FileEntry {
+                    name: "dir".to_string(),
+                    path: std::env::temp_dir().join("dir"),
+                    is_dir: true,
+                },
+            ],
+            selected: 0,
+        });
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_file_picker_modal(frame, &app))
+            .unwrap();
+    }
+
+    #[test]
+    fn draw_remote_picker_modal_smoke() {
+        let mut app = App::for_test();
+        app.remote_picker = Some(RemotePickerState {
+            cwd: "/".to_string(),
+            entries: vec![RemoteEntry {
+                name: "etc".to_string(),
+                path: "/etc".to_string(),
+                is_dir: true,
+            }],
+            selected: 0,
+            loading: false,
+            error: None,
+            only_dirs: true,
+        });
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_remote_picker_modal(frame, &app))
+            .unwrap();
+    }
+}

@@ -332,3 +332,36 @@ impl App {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_range_handles_empty() {
+        let mut app = App::for_test();
+        app.set_details_height(10);
+        let (start, end) = app.history_range(0, false);
+        assert_eq!((start, end), (0, 0));
+    }
+
+    #[test]
+    fn history_range_pages() {
+        let mut app = App::for_test();
+        app.set_details_height(6);
+        let (start, end) = app.history_range(10, false);
+        assert_eq!(start, 0);
+        assert!(end > start);
+        app.history_page = 1;
+        let (start2, _end2) = app.history_range(10, false);
+        assert!(start2 >= start);
+    }
+
+    #[test]
+    fn max_history_page_calculates() {
+        let mut app = App::for_test();
+        app.set_details_height(6);
+        assert_eq!(app.max_history_page(0, false), 0);
+        assert_eq!(app.max_history_page(10, false), 9);
+    }
+}

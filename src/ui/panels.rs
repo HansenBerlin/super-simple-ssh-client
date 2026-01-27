@@ -373,6 +373,61 @@ pub(crate) fn draw_terminal_view(frame: &mut Frame<'_>, app: &App, area: Rect) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use crate::app::App;
+    use crate::model::{AuthConfig, ConnectionConfig};
+
+    #[test]
+    fn draw_terminal_footer_renders_keys() {
+        let backend = TestBackend::new(60, 2);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_terminal_footer(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(content.contains("F6"));
+        assert!(content.contains("F7"));
+        assert!(content.contains("F8"));
+    }
+
+    #[test]
+    fn draw_saved_list_renders_commands() {
+        let mut app = App::for_test();
+        app.connections.push(ConnectionConfig {
+            name: "Test".to_string(),
+            user: "u".to_string(),
+            host: "h".to_string(),
+            auth: AuthConfig::Password {
+                password: "pw".to_string(),
+            },
+            history: vec![],
+            last_remote_dir: None,
+        });
+        let backend = TestBackend::new(60, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_saved_list(frame, &app, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(content.contains("(n)ew"));
+        assert!(content.contains("(e)dit"));
+    }
+}
+
 pub(crate) fn draw_terminal_footer(frame: &mut Frame<'_>, area: Rect) {
     let footer = Paragraph::new(vec![
         Line::from(vec![

@@ -96,12 +96,12 @@ impl App {
                 self.set_status("Selected connection is not connected");
                 return;
             };
+            let backend = self.ssh_backend.clone();
             self.start_size_calc(move || {
-                let session = connect_ssh(&conn)?;
                 let Some(path) = source_remote else {
                     anyhow::bail!("missing remote source");
                 };
-                crate::ssh::remote_size(&session, &path, source_is_dir)
+                backend.remote_size(&conn, &path, source_is_dir)
             });
         }
     }
@@ -264,6 +264,9 @@ impl App {
     where
         F: FnOnce() -> Result<u64> + Send + 'static,
     {
+        if self.transfer.is_none() {
+            return;
+        }
         self.size_calc_generation = self.size_calc_generation.wrapping_add(1);
         let generation = self.size_calc_generation;
         let (tx, rx) = mpsc::channel();
@@ -272,5 +275,70 @@ impl App {
             let _ = tx.send((generation, result));
         });
         self.size_calc_rx = Some(rx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::ssh_backend::MockSshBackend;
+    use crate::model::{AuthConfig, ConnectionConfig, OpenConnection};
+    use std::sync::Arc;
+    use std::time::SystemTime;
+
+    #[test]
+    fn select_source_path_sets_pick_target() {
+        let mut app = App::for_test();
+        app.start_transfer(TransferDirection::Upload);
+        app.select_source_path(PathBuf::from("/tmp/file"), false);
+        let transfer = app.transfer.as_ref().unwrap();
+        assert!(matches!(transfer.step, TransferStep::PickTarget));
+        assert_eq!(transfer.source_path.as_ref().unwrap().to_string_lossy(), "/tmp/file");
+    }
+
+    #[test]
+    fn size_calc_updates_transfer() {
+        let mut app = App::for_test();
+        app.start_transfer(TransferDirection::Upload);
+        app.start_size_calc(|| Ok(42));
+        app.poll_size_calc();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.poll_size_calc();
+        let transfer = app.transfer.as_ref().unwrap();
+        assert_eq!(transfer.size_bytes, Some(42));
+    }
+
+    #[test]
+    fn remote_size_calc_uses_backend() {
+        let backend = Arc::new(MockSshBackend::default());
+        backend.set_size(Ok(99));
+        let mut app = App::for_test_with_backend(backend);
+        let connection = ConnectionConfig {
+            name: "test".to_string(),
+            user: "user".to_string(),
+            host: "host".to_string(),
+            auth: AuthConfig::Password {
+                password: "pw".to_string(),
+            },
+            history: vec![],
+            last_remote_dir: None,
+        };
+        app.connections.push(connection.clone());
+        app.open_connections.push(OpenConnection {
+            config: connection,
+            session: ssh2::Session::new().unwrap(),
+            connected_at: SystemTime::now(),
+        });
+        app.selected_saved = 0;
+        app.start_transfer(TransferDirection::Download);
+        if let Some(transfer) = &mut app.transfer {
+            transfer.source_remote = Some("/remote/file".to_string());
+            transfer.source_is_dir = false;
+        }
+        app.select_target_local_dir(std::env::temp_dir());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.poll_size_calc();
+        let transfer = app.transfer.as_ref().unwrap();
+        assert_eq!(transfer.size_bytes, Some(99));
     }
 }
