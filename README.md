@@ -1,14 +1,17 @@
 # Super Simple SSH
 
-Terminal-only SSH client built with `ratatui`. It stores connections securely (master password + encryption), keeps a short history, and supports upload/download via SFTP. After initial setup of connections, ssh into remote host with the press of a key.
+Terminal-only SSH client built with `ratatui`. It stores connections securely (master password + encryption), keeps a short history, and supports upload/download via SFTP. After initial setup of connections, SSH into a remote host with the press of a key.
 
 ## Install
 
 ### Debian/Ubuntu (deb)
 1. Download the `.deb` from the GitHub release.
+   ```bash
+   wget https://github.com/HansenBerlin/super-simple-ssh-client/releases/download/v*/super-simple-ssh-client-*-x86_64.deb
+   ```
 2. Install:
    ```bash
-   sudo apt install ./super-simple-ssh-client_0.1.0_amd64.deb
+   sudo apt install ./super-simple-ssh-client*.deb
    ```
 3. Run:
    ```bash
@@ -19,7 +22,7 @@ Terminal-only SSH client built with `ratatui`. It stores connections securely (m
 1. Download the `.rpm` from the GitHub release.
 2. Install:
    ```bash
-   sudo dnf install ./super-simple-ssh-client-0.1.0-1.x86_64.rpm
+   sudo dnf install ./super-simple-ssh-client-*-1.x86_64.rpm
    ```
 3. Run:
    ```bash
@@ -30,7 +33,7 @@ Terminal-only SSH client built with `ratatui`. It stores connections securely (m
 1. Download the `.pkg.tar.zst` from the GitHub release.
 2. Install:
    ```bash
-   sudo pacman -U ./super-simple-ssh-client-0.1.0-1-x86_64.pkg.tar.zst
+   sudo pacman -U ./super-simple-ssh-client-*-1-x86_64.pkg.tar.zst
    ```
 3. Run:
    ```bash
@@ -41,7 +44,7 @@ Terminal-only SSH client built with `ratatui`. It stores connections securely (m
 1. Download the `super-simple-ssh-client-x86_64-unknown-linux-gnu.tar.gz` artifact.
 2. Extract and run:
    ```bash
-   tar -xzf super-simple-ssh-client-x86_64-unknown-linux-gnu.tar.gz
+   tar -xzf super-simple-ssh-client-*-x86_64-unknown-linux-gnu.tar.gz
    ./ss-ssh
    ```
 
@@ -65,6 +68,11 @@ Connection list commands (bottom of left panel):
 - `(e)dit` edit connection
 - `(c)onnect` or `(c)ancel` based on connection state
 - `(x)delete`
+
+Terminal tabs:
+- Opening a terminal creates a new tab and replaces the help header.
+- `F6` previous tab, `F7` next tab, `F8` close tab.
+- Exiting the shell closes its tab.
 
 Navigation:
 - `Tab` / `Shift+Tab` or `Up/Down` to move in lists
@@ -100,6 +108,6 @@ Transfers show a progress bar; you can hide it with `Enter` and cancel with `Esc
 ## How it works
 - Connection configs are encrypted using a master password.
 - Successful connections are saved and sorted by recent use.
-- Open connections are managed in tabs (shown at the top).
+- Open terminals are managed in tabs (shown at the top).
 - Transfers use SFTP over the existing SSH setup.
 - Logs are stored under the app config directory and shown in the UI when enabled.

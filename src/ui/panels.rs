@@ -4,7 +4,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Tabs, Wrap};
 
 use crate::app::{App, HeaderMode};
 use crate::model::AuthConfig;
@@ -91,9 +91,9 @@ pub(crate) fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .map(|conn| connected.contains(&crate::model::connection_key(conn)))
         .unwrap_or(false);
     let connection_commands = if selected_connected {
-        "(n)ew | (e)dit | (c)ancel | (d)ownload | (x)delete"
+        "(n)ew | (e)dit | (c)ancel | (x)delete"
     } else {
-        "(n)ew | (e)dit | (c)onnect | (d)ownload | (x)delete"
+        "(n)ew | (e)dit | (c)onnect | (x)delete"
     };
     let commands = Paragraph::new(connection_commands)
         .style(Style::default().fg(Color::Gray))
@@ -108,7 +108,7 @@ pub(crate) fn draw_saved_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 pub(crate) fn draw_app_header(frame: &mut Frame<'_>, area: Rect) {
-    let title = Paragraph::new("SUPER SIMPLE SSH 0.1.0")
+    let title = Paragraph::new("SUPER SIMPLE SSH 0.1.2")
         .style(
             Style::default()
                 .fg(Color::White)
@@ -331,4 +331,61 @@ pub(crate) fn draw_open_tabs(
             .wrap(Wrap { trim: true });
         frame.render_widget(logs, logs_area);
     }
+}
+
+pub(crate) fn draw_terminal_tab_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let mut titles = Vec::with_capacity(app.terminal_tabs.len() + 1);
+    titles.push(Line::from(Span::styled(
+        "Connections",
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+    for tab in &app.terminal_tabs {
+        titles.push(Line::from(Span::raw(tab.title.clone())));
+    }
+    let tabs = Tabs::new(titles)
+        .select(app.active_terminal_tab)
+        .block(Block::default().borders(Borders::ALL))
+        .style(Style::default().fg(Color::Gray))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    frame.render_widget(tabs, area);
+}
+
+pub(crate) fn draw_terminal_view(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let index = app.active_terminal_tab.saturating_sub(1);
+    let Some(tab) = app.terminal_tabs.get(index) else {
+        return;
+    };
+    let screen = tab.parser.screen();
+    let contents = screen.contents().to_string();
+    let block = Block::default().borders(Borders::ALL);
+    let inner = block.inner(area);
+    let terminal = Paragraph::new(contents)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    frame.render_widget(terminal, area);
+    let (row, col) = screen.cursor_position();
+    if row < inner.height && col < inner.width {
+        frame.set_cursor_position((inner.x + col, inner.y + row));
+    }
+}
+
+pub(crate) fn draw_terminal_footer(frame: &mut Frame<'_>, area: Rect) {
+    let footer = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("F6", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" previous tab | "),
+            Span::styled("F7", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" next tab | "),
+            Span::styled("F8", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(" close tab"),
+        ]),
+    ])
+    .style(Style::default().fg(Color::Gray))
+    .alignment(Alignment::Center)
+    .wrap(Wrap { trim: true });
+    frame.render_widget(footer, area);
 }

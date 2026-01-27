@@ -49,3 +49,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10.8"
 ssh2 = "0.9"
+vt100 = "0.15"

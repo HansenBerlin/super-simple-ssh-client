@@ -42,6 +42,9 @@ impl App {
             }
             return Ok(false);
         }
+        if self.handle_terminal_tabs_key(key)? {
+            return Ok(false);
+        }
         self.poll_remote_fetch();
         if self.transfer.is_some() {
             if self.file_picker.is_some() {
@@ -430,6 +433,8 @@ impl App {
                             if direction == TransferDirection::Upload
                                 && step == TransferStep::PickSource
                             {
+                                self.last_local_dir = Some(picker.cwd.clone());
+                                self.save_store()?;
                                 self.select_source_path(entry.path, false);
                                 self.file_picker = None;
                                 self.open_remote_picker()?;
@@ -445,11 +450,15 @@ impl App {
                         if entry.is_dir {
                             match transfer_mode {
                                 Some((TransferDirection::Upload, TransferStep::PickSource)) => {
+                                    self.last_local_dir = Some(picker.cwd.clone());
+                                    self.save_store()?;
                                     self.select_source_path(entry.path, true);
                                     self.file_picker = None;
                                     self.open_remote_picker()?;
                                 }
                                 Some((TransferDirection::Download, TransferStep::PickTarget)) => {
+                                    self.last_local_dir = Some(picker.cwd.clone());
+                                    self.save_store()?;
                                     self.select_target_local_dir(entry.path);
                                     self.file_picker = None;
                                 }
@@ -515,7 +524,9 @@ impl App {
                     picker.selected = 0;
                     picker.loading = true;
                     picker.error = None;
-                    self.start_remote_fetch(new_cwd, picker.only_dirs)?;
+                    self.remote_picker = Some(picker);
+                    self.load_remote_dir(new_cwd, only_dirs)?;
+                    return Ok(false);
                 }
             }
             KeyCode::Enter => {
@@ -555,11 +566,14 @@ impl App {
                         picker.selected = 0;
                         picker.loading = true;
                         picker.error = None;
-                        self.start_remote_fetch(new_cwd, picker.only_dirs)?;
+                        self.remote_picker = Some(picker);
+                        self.load_remote_dir(new_cwd, only_dirs)?;
+                        return Ok(false);
                     } else if matches!(
                         transfer_mode,
                         Some((TransferDirection::Download, TransferStep::PickSource))
                     ) {
+                        self.update_last_remote_dir(picker.cwd.clone())?;
                         self.select_source_remote(entry.path, false);
                         self.remote_picker = None;
                         self.open_local_target_picker()?;
@@ -572,10 +586,12 @@ impl App {
                     if entry.is_dir {
                         match transfer_mode {
                             Some((TransferDirection::Upload, TransferStep::PickTarget)) => {
+                                self.update_last_remote_dir(picker.cwd.clone())?;
                                 self.select_target_dir(entry.path);
                                 return Ok(false);
                             }
                             Some((TransferDirection::Download, TransferStep::PickSource)) => {
+                                self.update_last_remote_dir(picker.cwd.clone())?;
                                 self.select_source_remote(entry.path, true);
                                 self.remote_picker = None;
                                 self.open_local_target_picker()?;
@@ -792,6 +808,10 @@ impl App {
                 .iter()
                 .map(|conn| crate::storage::encrypt_connection(conn, &new_key))
                 .collect::<Result<Vec<_>>>()?,
+            last_local_dir: self
+                .last_local_dir
+                .as_ref()
+                .map(|value| value.to_string_lossy().into_owned()),
         };
         save_store(&self.config_path, &stored)?;
         self.master = new_master;

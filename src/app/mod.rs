@@ -19,6 +19,7 @@ mod handlers;
 mod helpers;
 mod logging;
 mod pickers;
+mod terminal;
 mod transfer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +41,7 @@ pub(crate) struct App {
     pub(crate) log_path: PathBuf,
     pub(crate) last_log: String,
     pub(crate) log_lines: VecDeque<String>,
+    pub(crate) last_local_dir: Option<PathBuf>,
     pub(crate) master: crate::model::MasterConfig,
     pub(crate) master_key: Vec<u8>,
     pub(crate) connections: Vec<ConnectionConfig>,
@@ -70,12 +72,16 @@ pub(crate) struct App {
     pub(crate) transfer_cancel: Option<mpsc::Sender<()>>,
     pub(crate) transfer_hidden: bool,
     pub(crate) transfer_last_logged: u64,
+    pub(crate) size_calc_rx: Option<mpsc::Receiver<(u64, Result<u64>)>>,
+    pub(crate) size_calc_generation: u64,
+    pub(crate) terminal_tabs: Vec<crate::app::terminal::TerminalTab>,
+    pub(crate) active_terminal_tab: usize,
 }
 
 impl App {
     pub(crate) fn load_with_master() -> Result<Self> {
         let config_path = config_path()?;
-        let (master, master_key, connections) = load_or_init_store(&config_path)?;
+        let (master, master_key, connections, last_local_dir) = load_or_init_store(&config_path)?;
         let log_path = log_path()?;
         prune_log_file(&log_path);
         let log_lines = VecDeque::new();
@@ -85,6 +91,7 @@ impl App {
             log_path,
             last_log,
             log_lines,
+            last_local_dir,
             master,
             master_key,
             connections,
@@ -115,6 +122,10 @@ impl App {
             transfer_cancel: None,
             transfer_hidden: false,
             transfer_last_logged: 0,
+            size_calc_rx: None,
+            size_calc_generation: 0,
+            terminal_tabs: vec![],
+            active_terminal_tab: 0,
         };
         app.sort_connections_by_recent(None);
         app.set_status(STATUS_READY);

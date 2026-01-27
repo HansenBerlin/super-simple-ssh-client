@@ -1,63 +1,16 @@
 use std::time::SystemTime;
 
 use anyhow::Result;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-use crossterm::execute;
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
-
 use crate::app::constants::NOT_CONNECTED_MESSAGE;
 use crate::app::App;
 use crate::model::{
     AuthConfig, AuthKind, ConnectionConfig, HistoryEntry, HistoryState, Mode,
     NewConnectionState, OpenConnection, TryResult,
 };
-use crate::ssh::{connect_ssh, run_ssh_terminal};
+use crate::ssh::connect_ssh;
 use crate::storage::save_store;
 
 impl App {
-    pub(crate) fn handle_terminal_mode(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-    ) -> Result<()> {
-        let Some(conn) = self.selected_connected_connection() else {
-            self.set_status(NOT_CONNECTED_MESSAGE);
-            return Ok(());
-        };
-        let open_conn = match self
-            .open_connections
-            .iter()
-            .find(|candidate| crate::model::same_identity(&candidate.config, &conn))
-        {
-            Some(conn) => conn,
-            None => {
-                self.set_status(NOT_CONNECTED_MESSAGE);
-                return Ok(());
-            }
-        };
-
-        execute!(terminal.backend_mut(), DisableMouseCapture).ok();
-        disable_raw_mode().ok();
-        execute!(terminal.backend_mut(), LeaveAlternateScreen).ok();
-
-        let result = run_ssh_terminal(&open_conn.session);
-
-        execute!(terminal.backend_mut(), EnterAlternateScreen).ok();
-        enable_raw_mode().ok();
-        execute!(terminal.backend_mut(), EnableMouseCapture).ok();
-        terminal.clear().ok();
-
-        match result {
-            Ok(()) => self.set_status("Exited terminal session"),
-            Err(err) => self.set_status(format!("Terminal session error: {err}")),
-        }
-
-        Ok(())
-    }
-
     pub(crate) fn history_range(&self, history_len: usize, has_error: bool) -> (usize, usize) {
         let page_size = self.history_page_size(has_error);
         if history_len == 0 {
@@ -284,6 +237,7 @@ impl App {
             host: self.new_connection.host.trim().to_string(),
             auth,
             history: vec![],
+            last_remote_dir: None,
         })
     }
 
@@ -312,6 +266,7 @@ impl App {
         if let Some(index) = self.edit_index {
             if let Some(existing) = self.connections.get(index) {
                 config.history = existing.history.clone();
+                config.last_remote_dir = existing.last_remote_dir.clone();
             }
             self.connections.remove(index);
             self.upsert_connection(config);
@@ -342,8 +297,27 @@ impl App {
                 .iter()
                 .map(|conn| crate::storage::encrypt_connection(conn, &self.master_key))
                 .collect::<Result<Vec<_>>>()?,
+            last_local_dir: self
+                .last_local_dir
+                .as_ref()
+                .map(|value| value.to_string_lossy().into_owned()),
         };
         save_store(&self.config_path, &stored)
+    }
+
+    pub(crate) fn update_last_remote_dir(&mut self, dir: String) -> Result<()> {
+        let Some(conn) = self.selected_connected_connection() else {
+            return Ok(());
+        };
+        if let Some(existing) = self
+            .connections
+            .iter_mut()
+            .find(|candidate| crate::model::same_identity(candidate, &conn))
+        {
+            existing.last_remote_dir = Some(dir);
+            self.save_store()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn history_page_size(&self, has_error: bool) -> usize {

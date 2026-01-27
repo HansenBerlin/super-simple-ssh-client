@@ -14,6 +14,8 @@ pub(crate) struct ConnectionConfig {
     pub(crate) auth: AuthConfig,
     #[serde(default)]
     pub(crate) history: Vec<HistoryEntry>,
+    #[serde(default)]
+    pub(crate) last_remote_dir: Option<String>,
 }
 
 impl ConnectionConfig {
@@ -53,6 +55,8 @@ pub(crate) struct HistoryEntry {
 pub(crate) struct StoreFile {
     pub(crate) master: MasterConfig,
     pub(crate) connections: Vec<StoredConnection>,
+    #[serde(default)]
+    pub(crate) last_local_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +80,8 @@ pub(crate) struct StoredConnection {
     pub(crate) auth: StoredAuthConfig,
     #[serde(default, deserialize_with = "deserialize_history")]
     pub(crate) history: Vec<HistoryEntry>,
+    #[serde(default)]
+    pub(crate) last_remote_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

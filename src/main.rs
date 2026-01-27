@@ -19,6 +19,7 @@ mod ui;
 
 use app::App;
 use model::AppAction;
+use ui::constants::{HEADER_HEIGHT, TERMINAL_FOOTER_HEIGHT};
 
 const TICK_RATE: Duration = Duration::from_millis(150);
 
@@ -49,13 +50,22 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
     let mut last_tick = std::time::Instant::now();
 
     loop {
-        let (_, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-        let details_height = if app.header_mode != app::HeaderMode::Off {
-            rows.saturating_sub(3)
+        let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+        let tabs_offset = if app.terminal_tabs_open() {
+            HEADER_HEIGHT.saturating_add(TERMINAL_FOOTER_HEIGHT)
         } else {
-            rows
+            0
+        };
+        let usable_rows = rows.saturating_sub(tabs_offset);
+        let details_height = if app.header_mode != app::HeaderMode::Off {
+            usable_rows.saturating_sub(3)
+        } else {
+            usable_rows
         };
         app.set_details_height(details_height);
+        if app.terminal_tabs_open() {
+            app.update_terminal_sizes(cols, usable_rows);
+        }
 
         terminal.draw(|frame| ui::draw_ui(frame, &app))?;
 
@@ -84,11 +94,17 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
         app.poll_remote_fetch();
         app.poll_transfer_progress();
+        app.poll_terminal_output();
+        app.poll_size_calc();
 
         if let Some(action) = app.pending_action.take() {
             match action {
                 AppAction::OpenTerminal => {
-                    app.handle_terminal_mode(terminal)?;
+                    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+                    app.open_terminal_tab(
+                        cols,
+                        rows.saturating_sub(HEADER_HEIGHT + TERMINAL_FOOTER_HEIGHT),
+                    )?;
                 }
             }
         }

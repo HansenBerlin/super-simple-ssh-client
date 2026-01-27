@@ -38,7 +38,7 @@ pub(crate) fn log_path() -> Result<PathBuf> {
 
 pub(crate) fn load_or_init_store(
     path: &Path,
-) -> Result<(MasterConfig, Vec<u8>, Vec<ConnectionConfig>)> {
+) -> Result<(MasterConfig, Vec<u8>, Vec<ConnectionConfig>, Option<PathBuf>)> {
     if path.exists() {
         let store = load_store(path)?;
         let master_key = prompt_existing_master(&store.master)?;
@@ -47,16 +47,22 @@ pub(crate) fn load_or_init_store(
             .into_iter()
             .map(|conn| decrypt_connection(conn, &master_key))
             .collect::<Result<Vec<_>>>()?;
-        return Ok((store.master, master_key, connections));
+        let last_local_dir = store
+            .last_local_dir
+            .as_ref()
+            .map(|value| PathBuf::from(value))
+            .filter(|value| value.is_dir());
+        return Ok((store.master, master_key, connections, last_local_dir));
     }
 
     let (master, master_key) = setup_master()?;
     let store = StoreFile {
         master: master.clone(),
         connections: vec![],
+        last_local_dir: None,
     };
     save_store(path, &store)?;
-    Ok((master, master_key, vec![]))
+    Ok((master, master_key, vec![], None))
 }
 
 pub(crate) fn load_store(path: &Path) -> Result<StoreFile> {
@@ -178,6 +184,7 @@ pub(crate) fn encrypt_connection(conn: &ConnectionConfig, key: &[u8]) -> Result<
         host: conn.host.clone(),
         auth,
         history: conn.history.clone(),
+        last_remote_dir: conn.last_remote_dir.clone(),
     })
 }
 
@@ -209,5 +216,6 @@ pub(crate) fn decrypt_connection(conn: StoredConnection, key: &[u8]) -> Result<C
         host: conn.host,
         auth,
         history: conn.history,
+        last_remote_dir: conn.last_remote_dir,
     })
 }
