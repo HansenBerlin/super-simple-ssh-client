@@ -185,8 +185,7 @@ jobs:
       - name: Install dependencies (vcpkg)
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgDirectory: ${{ runner.temp }}/vcpkg
-          vcpkgGitCommitId: "4c0b2b8f6b3b0b10cfa63bd9a2ef2350db5b8d46"
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
           runVcpkgInstall: true
           vcpkgJsonGlob: "vcpkg.json"
       - name: Build
