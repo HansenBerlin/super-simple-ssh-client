@@ -363,16 +363,22 @@ pub(crate) fn draw_terminal_view(frame: &mut Frame<'_>, app: &App, area: Rect) {
         return;
     };
     let screen = tab.parser.screen();
-    let contents = screen.contents().to_string();
-    let block = Block::default().borders(Borders::ALL);
-    let inner = block.inner(area);
-    let terminal = Paragraph::new(contents)
-        .block(block)
-        .wrap(Wrap { trim: false });
+    let view_cols = area.width.max(1);
+    let view_rows = area.height.max(1);
+    let mut lines = Vec::with_capacity(view_rows as usize);
+    for row in screen.rows(0, view_cols).take(view_rows as usize) {
+        let mut line = row;
+        let width = line.chars().count();
+        if width < view_cols as usize {
+            line.push_str(&" ".repeat(view_cols as usize - width));
+        }
+        lines.push(Line::from(line));
+    }
+    let terminal = Paragraph::new(lines);
     frame.render_widget(terminal, area);
     let (row, col) = screen.cursor_position();
-    if row < inner.height && col < inner.width {
-        frame.set_cursor_position((inner.x + col, inner.y + row));
+    if row < area.height && col < area.width {
+        frame.set_cursor_position((area.x + col, area.y + row));
     }
 }
 

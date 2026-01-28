@@ -26,22 +26,24 @@ impl App {
         };
         let session = connect_ssh(&conn)?;
         session.set_blocking(true);
+        let view_cols = cols.max(1);
+        let view_rows = rows.max(1);
         let mut channel = session.channel_session()?;
         channel.request_pty(
             "xterm-256color",
             None,
-            Some((u32::from(cols.max(1)), u32::from(rows.max(1)), 0, 0)),
+            Some((u32::from(view_cols), u32::from(view_rows), 0, 0)),
         )?;
         channel.shell()?;
         session.set_blocking(false);
-        let parser = vt100::Parser::new(rows.max(1), cols.max(1), 0);
+        let parser = vt100::Parser::new(view_rows, view_cols, 0);
         let tab = TerminalTab {
             title: conn.label(),
             _session: session,
             channel,
             parser,
-            cols: cols.max(1),
-            rows: rows.max(1),
+            cols: view_cols,
+            rows: view_rows,
             pending_write: Vec::new(),
         };
         self.terminal_tabs.push(tab);
