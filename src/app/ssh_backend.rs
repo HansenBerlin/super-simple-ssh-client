@@ -5,6 +5,9 @@ use anyhow::{Context, Result};
 use crate::model::{ConnectionConfig, OpenConnection, RemoteEntry};
 use crate::ssh::connect_ssh;
 
+#[cfg(test)]
+use std::collections::HashMap;
+
 pub(crate) trait SshBackend: Send + Sync {
     fn list_remote_dir(
         &self,
@@ -199,7 +202,7 @@ impl SshBackend for MockSshBackend {
         _show_hidden: bool,
     ) -> Result<Vec<RemoteEntry>> {
         if let Some(err) = self.list_errors.lock().unwrap().get(cwd) {
-            return Err(anyhow::anyhow!(err.clone()));
+            return Err(anyhow::anyhow!(err.to_string()));
         }
         Ok(self
             .list
