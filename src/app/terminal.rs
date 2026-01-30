@@ -171,7 +171,10 @@ impl App {
             .row
             .saturating_sub(view_top)
             .min(view_rows.saturating_sub(1));
-        let col = mouse.column.min(view_cols.saturating_sub(1));
+        let col = mouse
+            .column
+            .saturating_sub(1)
+            .min(view_cols.saturating_sub(1));
         let col_exclusive = col.saturating_add(1).min(view_cols);
 
         if let Some(tab) = self
@@ -434,8 +437,14 @@ impl TerminalTab {
 
     fn selection_text(&self) -> Option<String> {
         let mut range = self.selection_range()?;
+        if range.start_col > 0 {
+            range.start_col = range.start_col.saturating_sub(1);
+        }
+        let cols = self.parser.screen().size().1;
+        if range.end_col < cols {
+            range.end_col = range.end_col.saturating_add(1).min(cols);
+        }
         if range.start_row == range.end_row && range.end_col == range.start_col {
-            let cols = self.parser.screen().size().1;
             range.end_col = range.end_col.saturating_add(1).min(cols);
         }
         let screen = self.parser.screen();
