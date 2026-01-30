@@ -73,8 +73,12 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         if event::poll(timeout)? {
             match event::read()? {
                 Event::Key(key) => {
-                    if key.modifiers.contains(KeyModifiers::CONTROL)
-                        && matches!(key.code, KeyCode::Char('c'))
+                    let ctrl_c = key.modifiers.contains(KeyModifiers::CONTROL)
+                        && matches!(key.code, KeyCode::Char('c'));
+                    let ctrl_shift_c = ctrl_c && key.modifiers.contains(KeyModifiers::SHIFT);
+                    if ctrl_c
+                        && !ctrl_shift_c
+                        && !(app.terminal_tabs_open() && app.active_terminal_tab > 0)
                     {
                         return Ok(());
                     }
@@ -82,7 +86,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                         return Ok(());
                     }
                 }
-                Event::Mouse(_) => {}
+                Event::Mouse(mouse) => {
+                    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+                    app.handle_terminal_mouse(mouse, cols, rows);
+                }
                 Event::Resize(_, _) => {}
                 _ => {}
             }

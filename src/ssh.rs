@@ -321,6 +321,11 @@ pub(crate) fn expand_tilde(path: &str) -> PathBuf {
 pub(crate) fn terminal_key_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     match key.code {
         KeyCode::Char(c) => {
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(c.to_ascii_lowercase(), 'v')
+            {
+                return None;
+            }
             if key.modifiers.contains(KeyModifiers::CONTROL) {
                 let byte = (c as u8) & 0x1f;
                 Some(vec![byte])

@@ -20,7 +20,7 @@ mod helpers;
 mod logging;
 mod pickers;
 mod ssh_backend;
-mod terminal;
+pub(crate) mod terminal;
 mod transfer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +78,7 @@ pub(crate) struct App {
     pub(crate) terminal_tabs: Vec<crate::app::terminal::TerminalTab>,
     pub(crate) active_terminal_tab: usize,
     pub(crate) ssh_backend: Arc<dyn crate::app::ssh_backend::SshBackend>,
+    pub(crate) clipboard: Option<arboard::Clipboard>,
 }
 
 impl App {
@@ -129,6 +130,7 @@ impl App {
             terminal_tabs: vec![],
             active_terminal_tab: 0,
             ssh_backend: Arc::new(crate::app::ssh_backend::RealSshBackend::default()),
+            clipboard: None,
         };
         app.sort_connections_by_recent(None);
         app.set_status(STATUS_READY);
@@ -197,6 +199,7 @@ impl App {
             active_terminal_tab: 0,
             last_local_dir: None,
             ssh_backend,
+            clipboard: None,
         }
     }
 }

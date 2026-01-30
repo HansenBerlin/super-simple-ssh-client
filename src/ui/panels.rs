@@ -5,6 +5,7 @@ use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Tabs, Wrap};
+use unicode_width::UnicodeWidthChar;
 
 use crate::app::{App, HeaderMode};
 use crate::model::AuthConfig;
@@ -365,20 +366,87 @@ pub(crate) fn draw_terminal_view(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let screen = tab.parser.screen();
     let view_cols = area.width.max(1);
     let view_rows = area.height.max(1);
+    let selection = tab.selection_range();
     let mut lines = Vec::with_capacity(view_rows as usize);
-    for row in screen.rows(0, view_cols).take(view_rows as usize) {
-        let mut line = row;
-        let width = line.chars().count();
-        if width < view_cols as usize {
-            line.push_str(&" ".repeat(view_cols as usize - width));
+    for (row_index, row) in screen
+        .rows(0, view_cols)
+        .take(view_rows as usize)
+        .enumerate()
+    {
+        let row_index = row_index as u16;
+        let mut spans: Vec<Span> = Vec::new();
+        let mut current = String::new();
+        let mut current_selected = None;
+        let mut col = 0u16;
+        for ch in row.chars() {
+            let width = ch.width().unwrap_or(1).max(1) as u16;
+            let selected = selection_for_cell(selection.as_ref(), row_index, col, width, view_cols);
+            if current_selected != Some(selected) {
+                if !current.is_empty() {
+                    let text = std::mem::take(&mut current);
+                    spans.push(selection_span(text, current_selected.unwrap_or(false)));
+                }
+                current_selected = Some(selected);
+            }
+            current.push(ch);
+            col = col.saturating_add(width);
         }
-        lines.push(Line::from(line));
+        while col < view_cols {
+            let selected = selection_for_cell(selection.as_ref(), row_index, col, 1, view_cols);
+            if current_selected != Some(selected) {
+                if !current.is_empty() {
+                    let text = std::mem::take(&mut current);
+                    spans.push(selection_span(text, current_selected.unwrap_or(false)));
+                }
+                current_selected = Some(selected);
+            }
+            current.push(' ');
+            col += 1;
+        }
+        if !current.is_empty() {
+            spans.push(selection_span(current, current_selected.unwrap_or(false)));
+        }
+        lines.push(Line::from(spans));
     }
     let terminal = Paragraph::new(lines);
     frame.render_widget(terminal, area);
     let (row, col) = screen.cursor_position();
     if row < area.height && col < area.width {
         frame.set_cursor_position((area.x + col, area.y + row));
+    }
+}
+
+fn selection_for_cell(
+    selection: Option<&crate::app::terminal::SelectionRange>,
+    row: u16,
+    col: u16,
+    width: u16,
+    cols: u16,
+) -> bool {
+    let Some(selection) = selection else {
+        return false;
+    };
+    if row < selection.start_row || row > selection.end_row {
+        return false;
+    }
+    let (start_col, end_col) = if selection.start_row == selection.end_row {
+        (selection.start_col, selection.end_col)
+    } else if row == selection.start_row {
+        (selection.start_col, cols.saturating_sub(1))
+    } else if row == selection.end_row {
+        (0, selection.end_col)
+    } else {
+        (0, cols.saturating_sub(1))
+    };
+    let cell_end = col.saturating_add(width.saturating_sub(1));
+    cell_end >= start_col && col < end_col
+}
+
+fn selection_span(text: String, selected: bool) -> Span<'static> {
+    if selected {
+        Span::styled(text, Style::default().add_modifier(Modifier::REVERSED))
+    } else {
+        Span::raw(text)
     }
 }
 
